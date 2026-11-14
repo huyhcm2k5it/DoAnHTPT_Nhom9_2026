@@ -57,7 +57,7 @@ Nguồn sách: ThS. Nguyễn Xuân Anh, *Bài giảng Hệ thống phân tán*, 
 | expected AppliedIndex, loại đọc và owner | `ReadStableSnapshotAsync`: dữ liệu và AppliedIndex từ cùng snapshot SQL |
 | Log, DatasetId/NodeId và schema version | Migration/seed có kiểm soát, rebuild projection, SQL oracle và chứng cứ durable commit |
 
-### Các bước Huy cần làm
+### Tuần 1 Làm H1 đến H4
 
 #### H1 Tạo schema và seed có thể chạy lại an toàn
 
@@ -82,6 +82,8 @@ Nguồn sách: ThS. Nguyễn Xuân Anh, *Bài giảng Hệ thống phân tán*, 
 **Làm:** tạo `SqlSnapshotReader.cs`; đọc dữ liệu cùng AppliedIndex từ một snapshot SQL, lọc kết quả/reservation theo OwnerId đã xác thực. Coordinator kiểm tra Stable trước khi gọi và truyền expected index; sai mốc phải từ chối hoặc đọc lại theo luồng đã chốt, không ghép mốc cũ với dữ liệu mới. Thêm tra cứu log/result theo RequestId khi SQL báo lỗi sau commit.
 
 **Tự kiểm và bàn giao:** inject lỗi sau commit nhưng trước return: đóng gate qua Control, xác minh log trước khi tiếp tục; không cấp EventId thứ hai. Kiểm tra T19 và T29 cùng Gia Quân. Chọn và ghi rõ isolation phù hợp, không dùng NOLOCK cho snapshot có thẩm quyền.
+
+### Tuần 2 Làm H5 và H6
 
 #### H5 Viết oracle và đối soát dữ liệu
 
@@ -118,7 +120,7 @@ Nguồn sách: ThS. Nguyễn Xuân Anh, *Bài giảng Hệ thống phân tán*, 
 | CommandIdentity và dữ liệu sự kiện | Canonical command/event/result bytes, CommandHash/EventHash fixtures dùng chung |
 | LocalApplied và MatchingReceipt từ store/replication | StableIndex chỉ tăng khi receipt khớp; FINAL chỉ trong giới hạn Stable |
 
-### Các bước Gia Quân cần làm
+### Tuần 1 Làm Q1 đến Q4 và ghép sớm Q5
 
 #### Q1 Chốt Contracts và fixture dùng chung
 
@@ -143,6 +145,8 @@ Nguồn sách: ThS. Nguyễn Xuân Anh, *Bài giảng Hệ thống phân tán*, 
 **Làm:** tạo `CommandCoordinator.cs`; một worker cấp grant, xử lý tuần tự cả mutation và đọc có thẩm quyền. Queue giới hạn 256; đầy thì RETRY_LATER trước khi bắt đầu. Grant của mutation giữ đến Stable hoặc cụm bị đóng gate; không nhận mutation kế trên projection chưa Stable. Đồng bộ việc grant/freeze với AuthorityGate của Đức An.
 
 **Tự kiểm và bàn giao:** ba quầy HOLD ghế 1 bằng ba RequestId khác nhau chỉ một OK_HELD. Chặn replication của lệnh đầu: lệnh tiếp không được quyết định và GET_SEATS không thấy projection chưa Stable. ACK/heartbeat phải đi đường I/O riêng, không xếp vào worker đang chờ chính chúng.
+
+### Tuần 2 Hoàn thiện Q5 và Q6
 
 #### Q5 Ghép Apply rồi replica rồi FINAL
 
@@ -179,7 +183,7 @@ Nguồn sách: ThS. Nguyễn Xuân Anh, *Bài giảng Hệ thống phân tán*, 
 | Manifest, bằng chứng fence và quyền admin | `PromoteAsync`: Activated hoặc Blocked sau ghi/readback cả hai participant |
 | Node RECOVERING, nguồn READY và RepairPlan khi cần | `RejoinAsync`: VerifiedAtK hoặc Blocked; authority gate thống nhất với coordinator |
 
-### Các bước Đức An cần làm
+### Tuần 1 Làm A1 đến A3
 
 #### A1 Cài một cổng quyền phục vụ duy nhất
 
@@ -198,6 +202,8 @@ Nguồn sách: ThS. Nguyễn Xuân Anh, *Bài giảng Hệ thống phân tán*, 
 **Làm:** thiết kế lệnh quản trị riêng được xác thực, không cho cổng client gọi promotion. Tạo runbook chỉ rõ primary cũ nào cần dừng, cách dừng hẳn Host/ngăn tự khởi động hoặc tắt máy, và bằng chứng người vận hành phải ghi. Không coi mất ping hay tăng epoch là fencing.
 
 **Tự kiểm và bàn giao:** mô phỏng chỉ mất heartbeat trong khi primary vẫn chạy: node mới giữ candidate/BLOCKED, không writer thứ hai. Thiếu quyền admin, thiếu fence hoặc thiếu hai participant hợp lệ phải từ chối. PR có code kiểm tra điều kiện và runbook, không chỉ mô tả thao tác tay.
+
+### Tuần 2 Làm A4 đến A6
 
 #### A4 Cài compare và promotion manifest
 
@@ -240,7 +246,7 @@ Nguồn sách: ThS. Nguyễn Xuân Anh, *Bài giảng Hệ thống phân tán*, 
 | Prefix report, mốc replay và RecoveryContext hợp lệ | Chuỗi entry nguyên bytes; catch-up/VerifiedAtK phối hợp Control |
 | TCP byte stream/TLS session và envelope v1 | Frame length-prefix/JSON đúng giới hạn; lỗi frame đóng kết nối, không sửa nghiệp vụ |
 
-### Các bước Nguyên Chương cần làm
+### Tuần 1 Làm C1 đến C4
 
 #### C1 Cài framing và kết nối TCP độc lập nghiệp vụ
 
@@ -265,6 +271,8 @@ Nguồn sách: ThS. Nguyễn Xuân Anh, *Bài giảng Hệ thống phân tán*, 
 **Làm:** tạo `ReplicaSender.cs`, triển khai `EnsureOneBackupAsync` nhận PersistedEvent đã lưu. Gửi đúng event tới các backup hợp lệ, kiểm tra receipt đủ NodeId/AuthorityEpoch/EventEpoch/LogIndex/EventId/EventHash. Dùng deadline replication 5 giây mặc định V12, ghi rõ giá trị khi test; không tạo event thay thế khi đổi backup.
 
 **Tự kiểm và bàn giao:** backup thứ nhất mất ACK, backup thứ hai ACK đúng thì trả MatchingReceipt. ACK sai hash/epoch/event hoặc từ node ngoài membership không đạt. Hết deadline chưa đủ bằng chứng trả Uncertain cho coordinator, không tự gọi FINAL hoặc tự bỏ event đã LocalApplied.
+
+### Tuần 2 Làm C5 và C6
 
 #### C5 Cài catch up và replay được cấp quyền
 
@@ -301,7 +309,7 @@ Nguồn sách: ThS. Nguyễn Xuân Anh, *Bài giảng Hệ thống phân tán*, 
 | FINAL/UNKNOWN/NOT_FOUND và kết quả GET_RESULT | Resolve cùng identity/ResultPayload; không cấp RequestId mới khi timeout/reconnect |
 | Snapshot có AppliedIndex và reservation của chủ quầy | 10 ghế có nhãn AVAILABLE/HELD/SOLD; pending/UNKNOWN tách trạng thái xác nhận |
 
-### Các bước Văn Khoa cần làm
+### Tuần 1 Làm K1 đến K3 và ghép UI cơ bản của K5
 
 #### K1 Cài SDK trước khi mở thao tác trên UI
 
@@ -320,6 +328,8 @@ Nguồn sách: ThS. Nguyễn Xuân Anh, *Bài giảng Hệ thống phân tán*, 
 **Làm:** tạo `EndpointRouter.cs`; thử endpoint từ cấu hình, xác minh TLS, kiểm tra node PRIMARY_READY và đăng nhập lại khi đổi server. Leader hint chỉ giúp chọn endpoint, không mở quyền server. Khi đổi kết nối/epoch, bỏ response của socket cũ và tra lại ở primary hiện hành.
 
 **Tự kiểm và bàn giao:** mất server hiện tại thì UI báo mất kết nối/đang xác minh, không tự khẳng định thất bại. Không chặn UI thread bằng network wait hoặc Thread.Sleep. Giao Nguyên Chương trace kết nối/correlation để kiểm tra response lạc phiên.
+
+### Tuần 2 Làm K4 đến K6 và hoàn thiện UI
 
 #### K4 Cài resolve và retry giữ nguyên identity
 
