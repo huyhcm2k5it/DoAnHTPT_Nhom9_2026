@@ -1,0 +1,15 @@
+**/bin/
+**/obj/
+.vs/
+.idea/
+*.user
+*.suo
+.tools/
+.review/
+docs/superpowers/
+artifacts/
+data/
+*.pfx
+*.p12
+*.key
+config/**/secrets*.json

@@ -1,0 +1,25 @@
+{
+  "nodeId": 1,
+  "datasetId": "124a4f06-4ac1-4c12-8b27-202600000009",
+  "nodes": [
+    {
+      "nodeId": 1,
+      "host": "192.168.1.11",
+      "clientPort": 9001,
+      "peerPort": 9100
+    },
+    {
+      "nodeId": 2,
+      "host": "192.168.1.12",
+      "clientPort": 9001,
+      "peerPort": 9100
+    },
+    {
+      "nodeId": 3,
+      "host": "192.168.1.13",
+      "clientPort": 9001,
+      "peerPort": 9100
+    }
+  ],
+  "dataDirectory": "data/servers/s1"
+}
