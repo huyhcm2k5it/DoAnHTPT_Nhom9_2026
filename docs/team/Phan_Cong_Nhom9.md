@@ -1,6 +1,21 @@
 # Phân công triển khai — Nhóm 9
 
-Nguồn chuẩn là [thiết kế V12](../De6_Thiet_Ke_Trien_Khai_V12.md), đặc biệt mục 6–17, 20–23. Tài liệu này phân công công việc cần làm, không xác nhận hệ thống đã hoàn tất. Bộ khung hiện tại chỉ kiểm tra cấu hình, server đóng quyền ở RECOVERING và UI vô hiệu hóa 10 ghế; SQL, TLS, booking và replication còn phải triển khai. Dùng cho đợt triển khai trong 3 tuần theo yêu cầu của nhóm; không chia lịch ngày/giờ. Thứ tự dưới đây là thứ tự phụ thuộc kỹ thuật; chỉ chuyển cổng khi đủ bằng chứng. Phạm vi cần hoàn thành vẫn là bản cơ sở V12, không giảm điều kiện an toàn để kịp thời gian.
+## Kế hoạch triển khai trong hai tuần
+
+Mục tiêu là hoàn thiện bản cơ sở bán vé một chuyến 10 ghế theo V12. Bảng này đặt đầu ra cho từng tuần; các bước H1–H6, Q1–Q6, A1–A6, C1–C6 và K1–K6 được giải thích chi tiết ở phần mỗi người phía sau. Cả năm người đều code, test, review và viết phần lý thuyết gắn với code.
+
+| Thành viên | Tuần 1 làm nền tảng và ghép luồng thật | Tuần 2 hoàn thiện chịu lỗi và bàn giao |
+| --- | --- | --- |
+| Huy | H1–H4: schema/seed, Apply nguyên tử, duplicate và snapshot; ghép SQL với Domain/Host; giao store và oracle cơ bản. | H5–H6: digest/rebuild, SQL failure và cấu hình ba DB độc lập; phối hợp recovery, chạy oracle và tổng hợp bản tích hợp. |
+| Gia Quân | Q1–Q4, ghép sớm Q5: chốt Contracts/fixture, nghiệp vụ, dedup và coordinator; cùng Huy/Nguyên Chương chạy HOLD–CONFIRM với backup thật. | Hoàn thiện Q5–Q6: Stable/FINAL, gate đọc, cancellation và queue; chạy tương tranh/retry/ACK sai, sửa lỗi tích hợp, hoàn thiện phần loại trừ tập trung. |
+| Đức An | A1–A3: gate boot đóng, grant/freeze, Bully và test timer; chốt API quản trị/fencing, manifest và RecoveryContext với các bên. | A4–A6: compare/promotion, tiếp tục manifest, rejoin và fault test; chứng minh chưa fence không mở writer; bàn giao runbook và phần Bully. |
+| Nguyên Chương | C1–C4: framing, TLS, peer identity, receiver/sender; ghép Apply thật và ACK sau commit, đủ một backup mới hoàn tất. | C5–C6: catch-up/replay, GAP/conflict, ACK mất/cũ và fault hooks; chạy ba node/rejoin, giao trace và phần primary-backup/phục hồi. |
+| Văn Khoa | K1–K3, ghép sớm K5: SDK, pending bền vững, router/login và UI tối thiểu; nối luồng giữ/xác nhận thật, không báo thành công giả. | K4–K6: resolve/retry cùng identity, client restart/failover, hoàn thiện UI; chạy ba quầy với store riêng, thu số liệu/demo và phần RPC/truyền thông. |
+| Cả nhóm | Chốt G0, đạt G1 và hướng tới G2: ít nhất primary + một backup thật, FINAL đúng điều kiện. Mỗi người có PR/code/test; mở khung báo cáo và giải thích trace phần mình. | Hoàn tất G2 nếu còn thiếu rồi G3–G5 theo phụ thuộc: ba node, lỗi/recovery, ma trận T01–T36 có record, báo cáo/video và review phát hành. |
+
+**Cách chốt kết quả:** cuối mỗi tuần, từng người bàn giao PR, lệnh test và record thực; ghi rõ phần đạt, lỗi còn lại và phụ thuộc đang chờ. Tuần 2 phải dành công sức ghép/test và sửa lỗi, không để tới cuối mới nối các module. Cổng nào chưa đủ bằng chứng thì giữ trạng thái chưa đạt; bảng là mục tiêu tiến độ, không tự biến T01–T36 thành PASS. Không chia lịch theo ngày/giờ.
+
+Nguồn chuẩn là [thiết kế V12](../De6_Thiet_Ke_Trien_Khai_V12.md), đặc biệt mục 6–17, 20–23. Tài liệu này phân công công việc cần làm, không xác nhận hệ thống đã hoàn tất. Bộ khung hiện tại chỉ kiểm tra cấu hình, server đóng quyền ở RECOVERING và UI vô hiệu hóa 10 ghế; SQL, TLS, booking và replication còn phải triển khai. Dùng cho đợt triển khai trong 2 tuần theo yêu cầu của nhóm; không chia lịch ngày/giờ. Thứ tự dưới đây là thứ tự phụ thuộc kỹ thuật; chỉ chuyển cổng khi đủ bằng chứng. Phạm vi cần hoàn thành vẫn là bản cơ sở V12, không giảm điều kiện an toàn để kịp thời gian.
 
 **Yêu cầu bắt buộc: cả năm người đều trực tiếp viết code, viết/chạy test và bàn giao PR riêng.** Không có vai trò chỉ làm báo cáo, QA hoặc tích hợp. Mỗi người hoàn thiện ít nhất một luồng chức năng qua các module liên quan trong ownership của mình, có test và review; trách nhiệm reviewer/điều phối là phần bổ sung. Đánh giá bằng PR, file code, hành vi và bằng chứng test; không dùng số commit làm thước đo đóng góp.
 
@@ -417,11 +432,11 @@ Với mỗi hành vi mới: viết ca kiểm tra đầu vào/kết quả mong đ
 4. Chỉ đánh dấu PASS những mã đã chạy đủ oracle, ghi FAIL/CHƯA CHẠY cho phần còn lại; không đổi toàn ma trận vì build xanh. Nhờ reviewer đúng người, sửa nhận xét rồi Huy phối hợp ghép theo cổng.
 5. Cập nhật file báo cáo riêng: giải thích phần sách bằng lời của mình, trỏ đúng code/PR, kèm một trace/test thật và giới hạn. Mỗi người phải bảo vệ được cả lý thuyết lẫn phần mình code.
 
-### Phạm vi cần giữ trong đợt 3 tuần
+### Phạm vi cần giữ trong đợt 2 tuần
 
 Tập trung một chuyến 10 ghế, ba server/SQL độc lập, ba quầy, ba cơ chế đã chốt và các điều kiện an toàn V12. Làm luồng HOLD/CONFIRM/CANCEL có kiểm chứng trước, rồi ghép ba node, chuyển quyền/rejoin và các lỗi theo G0–G5. Giao diện rõ trạng thái và đủ thao tác là ưu tiên; trang trí, tính năng thanh toán, đăng ký người dùng, nhiều chuyến, microservice hay thuật toán khác chưa thuộc bản cơ sở. Không bỏ pending, gate đọc, replica durable hoặc fencing để đổi lấy thêm màn hình.
 
-Ba tuần là thời lượng nhóm dự kiến, không phải bằng chứng hoàn tất. Nếu hết thời gian mà một cổng chưa đạt, phải báo trạng thái thực và giới hạn còn thiếu; không ghi hệ thống chịu lỗi/đạt CLO chỉ từ build hoặc mô hình. CLO chính thức của đúng lớp vẫn cần đề cương/rubric giảng viên; các mục sách/bài giảng ở đây là đối chiếu học thuật, không thay xác nhận đó.
+Hai tuần là thời lượng nhóm dự kiến, không phải bằng chứng hoàn tất. Nếu hết thời gian mà một cổng chưa đạt, phải báo trạng thái thực và giới hạn còn thiếu; không ghi hệ thống chịu lỗi/đạt CLO chỉ từ build hoặc mô hình. CLO chính thức của đúng lớp vẫn cần đề cương/rubric giảng viên; các mục sách/bài giảng ở đây là đối chiếu học thuật, không thay xác nhận đó.
 
 ## 12. Giải thích nhanh những từ dùng trong phân công
 
