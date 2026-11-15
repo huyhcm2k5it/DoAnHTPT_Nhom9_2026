@@ -2,7 +2,7 @@
 
 Owner: Gia Quân.
 
-Implement command validation, business decisions and one-at-a-time coordinator. Reads and writes must respect StableIndex, no mutation after uncertain LocalApplied; response cancellation cannot abandon applied work. ICommandCoordinator has no implementation. V12 sections 6-10, 16; T02-T12, T29, T32.
+`BookingDecisionEngine`, `CommandIdentityValidator` and `CommandCoordinator` implement the week 1 in-memory domain path. The coordinator serializes mutations, blocks uncertain local commits, checks replica receipts and StableIndex before FINAL, and gates `GetSeats`/`GetResult`. Unit tests use fake storage, authority and replication. SQL transaction atomicity, real gate/replica wiring and three-node acceptance still depend on the other modules. V12 sections 6-10, 16; T02-T12, T29, T32.
 
 Specification: [V12](../../docs/De6_Thiet_Ke_Trien_Khai_V12.md). Team handoff and commands: [repository README](../../README.md).
 
