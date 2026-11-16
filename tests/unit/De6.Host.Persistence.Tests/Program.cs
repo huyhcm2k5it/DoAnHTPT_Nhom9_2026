@@ -162,7 +162,7 @@ internal static class CompositionCases
     }
     private sealed class NeverDecision : IBookingDecisionEngine
     {
-        public BookingDecision Decide(CommandIdentity command,BookingState state,long index,DateTime utcNow)
+        public StorageDecision Decide(CommandIdentity command,BookingState state,long index,DateTime utcNow)
             => throw new Exception("Decision engine must not be reached with a closed gate.");
     }
     // Deliberately always closed. This is a test-only adapter, never an authority grant.

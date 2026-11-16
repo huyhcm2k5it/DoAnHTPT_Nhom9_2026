@@ -31,9 +31,9 @@ internal sealed class TestGate : IStoreAccessGate
 // Test-only decision fixture. This is NOT Gia Quân's production decision engine.
 internal sealed class HoldFixture : IBookingDecisionEngine
 {
-    public BookingDecision Decide(CommandIdentity command, BookingState state, long index, DateTime utcNow)
+    public StorageDecision Decide(CommandIdentity command, BookingState state, long index, DateTime utcNow)
     {
-        BookingDecision No(string code,Guid? res=null,Guid? ticket=null) => new(new(DecisionKind.NoChange,null,null,null),new(code,1,state.Seat.SeatNo,res,ticket));
+        StorageDecision No(string code,Guid? res=null,Guid? ticket=null) => new(new(DecisionKind.NoChange,null,null,null),new(code,1,state.Seat.SeatNo,res,ticket));
         if(command.Command.Action==BookingAction.Hold)
         {
             if(state.Seat.Status!=SeatStatus.Available) return No(state.Seat.Status==SeatStatus.Held?"SEAT_BUSY":"ALREADY_SOLD");

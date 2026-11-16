@@ -2,7 +2,7 @@
 
 Owner: Gia Quân (phối hợp cả nhóm).
 
-Shared DTOs, typed IDs/enums and config validation. Protocol records are draft shapes; BookingCanonical, BookingEventCodec and storage contracts now cover the Persistence v1 fixture; other network/login/envelope contracts remain unfinished. Gia Quân and every consumer must review these additions before G0 merge. Changes require all consumers to review V12 sections 7, 8, 15, 16.
+Shared DTOs, typed IDs/enums and config validation. `CanonicalProtocol` now implements command, seed and event hashes plus canonical result/event bytes. Fixed byte fixtures run in `tests/unit/De6.Domain.UnitTests`. These contracts still need review against the SQL store, replica sender and client before G0 can be closed.
 
 Specification: [V12](../../docs/De6_Thiet_Ke_Trien_Khai_V12.md). Team handoff and commands: [repository README](../../README.md).
 

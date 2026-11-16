@@ -126,7 +126,7 @@ internal static class ReviewRegressionCases
     }
     private sealed class FixedTimeFixture : IBookingDecisionEngine
     {
-        public BookingDecision Decide(CommandIdentity command,BookingState state,long nextIndex,DateTime utcNow)
+        public StorageDecision Decide(CommandIdentity command,BookingState state,long nextIndex,DateTime utcNow)
             =>new HoldFixture().Decide(command,state,nextIndex,ExactUtc);
     }
 }

@@ -1,7 +1,5 @@
 namespace De6.Contracts;
 
-public enum ReservationStatus { Held, Confirmed, Cancelled }
-public enum DecisionKind { HeldCreated, SoldConfirmed, HoldCancelled, NoChange }
 public sealed record ReservationData(Guid ReservationId, int TripId, int SeatNo, string OwnerId,
     ReservationStatus Status, DateTime CreatedUtc, long UpdatedIndex);
 public sealed record TicketData(Guid TicketId, Guid ReservationId, int TripId, int SeatNo, string OwnerId,
@@ -10,7 +8,8 @@ public sealed record BookingState(SeatView Seat, ReservationData? RequestedReser
     ReservationData? CurrentReservation, TicketData? ExistingTicket, TicketData? CurrentTicket = null);
 public sealed record DecisionPatch(DecisionKind Kind, SeatView? SeatAfter,
     ReservationData? ReservationAfter, TicketData? TicketCreated);
-public sealed record BookingDecision(DecisionPatch Patch, BusinessResult Result);
+// Persistence's patch-oriented result is distinct from the coordinator's BookingDecision.
+public sealed record StorageDecision(DecisionPatch Patch, BusinessResult Result);
 public sealed record BookingEvent(int ProtocolVersion, Guid DatasetId, long LogIndex, long Epoch, int WriterId,
     Guid EventId, string PreviousHash, Guid RequestId, string OwnerId, string CommandHash,
     CommandData CommandData, long BeforeSeatVersion, DecisionPatch Decision, BusinessResult Result);
@@ -23,7 +22,7 @@ public sealed record ReservationsSnapshot(long AppliedIndex, IReadOnlyList<Reser
 /// <summary>Pure synchronous decision; runs on SQL state within the primary transaction. No I/O.</summary>
 public interface IBookingDecisionEngine
 {
-    BookingDecision Decide(CommandIdentity command, BookingState state, long nextIndex, DateTime utcNow);
+    StorageDecision Decide(CommandIdentity command, BookingState state, long nextIndex, DateTime utcNow);
 }
 
 /// <summary>
