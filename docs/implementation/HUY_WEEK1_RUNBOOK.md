@@ -19,6 +19,16 @@ NuGet.Config dùng nuget.org, pin Microsoft.Data.SqlClient 7.1.2. Nếu NuGet.or
 dotnet restore DoAnHTPT_Nhom9_2026.sln --source https://pkgs.dev.azure.com/dnceng/public/_packaging/dotnet-public/nuget/v3/index.json
 ```
 
+Để các script test/build cũng dùng mirror trong PowerShell hiện tại, đặt biến môi trường trước khi chạy:
+
+```powershell
+$env:DE6_NUGET_SOURCE='https://pkgs.dev.azure.com/dnceng/public/_packaging/dotnet-public/nuget/v3/index.json'
+.\scripts\test.ps1 -Configuration Release
+.\scripts\test-huy-sql.ps1 -Configuration Release
+```
+
+Không đặt biến này thì script tiếp tục dùng nguồn trong `scripts/nuget-template.config`.
+
 Nếu dùng SDK cục bộ, thay dotnet bằng `& .\.tools\dotnet\dotnet.exe`. Không cần đổi execution policy; có thể dùng CLI trực tiếp bên dưới.
 
 ## Tạo database riêng và xem trên SSMS
@@ -90,4 +100,4 @@ Store không gọi mạng trong SQL transaction. Operation đã bắt đầu kh�
 
 ## Giới hạn và tuần 2
 
-Chưa có rebuild/repair hoàn chỉnh, full-chain/digest tại K cho promotion, wiring Host hoặc SQL oracle tổng hợp H5–H6. Ba DB cùng laptop kiểm tra component, không chứng minh chịu lỗi ba máy. T01–T36 vẫn cần cluster thật và record/oracle; PASS component không biến ma trận nghiệm thu thành PASS.
+H5 đã bổ sung oracle/digest và rebuild projection có maintenance; xem HUY_WEEK2_RUNBOOK.md. Full repair/promotion, coordinator/network và nghiệm thu cluster vẫn phụ thuộc các module liên quan. Ba DB cùng laptop kiểm tra component, không chứng minh chịu lỗi ba máy. T01–T36 vẫn cần cluster thật và record/oracle; PASS component không biến ma trận nghiệm thu thành PASS.

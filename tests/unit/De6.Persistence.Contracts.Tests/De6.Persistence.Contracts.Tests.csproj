@@ -3,4 +3,5 @@
   <ItemGroup><ProjectReference Include="../../../src/De6.Contracts/De6.Contracts.csproj" /></ItemGroup>
   <ItemGroup><None Include="command-hash.txt" CopyToOutputDirectory="PreserveNewest" /></ItemGroup>
   <ItemGroup><None Include="event-v1.json" CopyToOutputDirectory="PreserveNewest" /><None Include="event-hash.txt" CopyToOutputDirectory="PreserveNewest" /></ItemGroup>
+  <ItemGroup><None Include="projection-hash.txt" CopyToOutputDirectory="PreserveNewest" /></ItemGroup>
 </Project>

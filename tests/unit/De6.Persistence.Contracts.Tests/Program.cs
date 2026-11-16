@@ -54,6 +54,13 @@ Check("reject noncanonical event JSON",()=>
     var json=File.ReadAllText(Path.Combine(AppContext.BaseDirectory,"event-v1.json"));
     MustReject(()=>BookingEventCodec.Read(Encoding.UTF8.GetBytes(json+" ")));
 });
+Check("projection digest matches independent seed fixture regardless of input order",()=>
+{
+    var seats=Enumerable.Range(1,10).Select(n=>new SeatView(1,n,SeatStatus.Available,null,null,0)).Reverse().ToArray();
+    var material=new StorageProjection(seats,Array.Empty<ReservationData>(),Array.Empty<TicketData>(),Array.Empty<DurableResultView>());
+    var expected=File.ReadAllText(Path.Combine(AppContext.BaseDirectory,"projection-hash.txt")).Trim();
+    if(Convert.ToHexStringLower(ProjectionDigest.Compute(dataset,0,material))!=expected) throw new Exception("Wrong canonical projection digest");
+});
 Console.WriteLine($"Contract failures: {failed}");
 return failed == 0 ? 0 : 1;
 

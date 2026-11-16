@@ -7,14 +7,16 @@ internal sealed class TestGate : IStoreAccessGate
     private readonly SemaphoreSlim mutex = new(1);
     public bool Blocked { get; private set; }
     public int Admissions { get; private set; }
+    public bool Maintenance { get; set; }
     public long StableIndex { get; set; }
     public RecoveryContext? InstalledRecovery { get; set; }
     public IDisposable EnterPrimary(AcceptedAuthority authority, long expectedNextIndex)
-        => Enter(() => !Blocked && authority == new AcceptedAuthority(1,1) && expectedNextIndex == StableIndex+1);
+        => Enter(() => !Blocked && !Maintenance && authority == new AcceptedAuthority(1,1) && expectedNextIndex == StableIndex+1);
     public IDisposable EnterAppend(AuthenticatedPeerAuthority peer) => Enter(() => !Blocked);
     public IDisposable EnterReplay(RecoveryContext context) => Enter(() => InstalledRecovery == context);
-    public IDisposable EnterSnapshot(long expectedIndex) => Enter(() => !Blocked && expectedIndex == StableIndex);
+    public IDisposable EnterSnapshot(long expectedIndex) => Enter(() => !Blocked && !Maintenance && expectedIndex == StableIndex);
     public IDisposable EnterRecoveryInspection() => Enter(() => true);
+    public IDisposable EnterMaintenance(long expectedIndex) => Enter(() => Maintenance);
     public void Block(string reason) { _ = reason; Blocked = true; }
     private IDisposable Enter(Func<bool> allowed)
     {

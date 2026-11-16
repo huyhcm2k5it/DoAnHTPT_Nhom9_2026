@@ -2,7 +2,9 @@
 
 Owner: Huy (tích hợp cả nhóm).
 
-Runnable safe composition shell: validates config, prints template status and RECOVERING/ServingEnabled=false, waits for Ctrl+C unless --check. No TCP listener, SQL check, election, replication or booking processing. Add module composition only after ownership gates and V12 acceptance evidence.
+Runnable closed bootstrap: validates configuration and always starts RECOVERING/ServingEnabled=false. `--check` validates files without SQL access. `--check-sql` probes an existing configured database read-only and exits. Normal startup probes configured SQL before waiting for Ctrl+C. No TCP listener, coordinator, election, replication, activation or booking processing is wired.
+
+SQL settings, local/LAN database names, exit codes, and the composition boundary are documented in [HUY_HOST_SQL](../../docs/implementation/HUY_HOST_SQL.md). The factory requires the real gate and decision engine supplied by their module owners; the Host never constructs substitutes.
 
 Specification: [V12](../../docs/De6_Thiet_Ke_Trien_Khai_V12.md). Team handoff and commands: [repository README](../../README.md).
 

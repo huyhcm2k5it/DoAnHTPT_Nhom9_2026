@@ -15,6 +15,10 @@ $env:DOTNET_SKIP_FIRST_TIME_EXPERIENCE = '1'
 $TemplateNugetConfig = Join-Path $PSScriptRoot 'nuget-template.config'
 
 function Restore-TemplateProject([string] $Project) {
-    & $DotnetPath restore $Project --configfile $TemplateNugetConfig
+    if ($env:DE6_NUGET_SOURCE) {
+        & $DotnetPath restore $Project --source $env:DE6_NUGET_SOURCE
+    } else {
+        & $DotnetPath restore $Project --configfile $TemplateNugetConfig
+    }
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }

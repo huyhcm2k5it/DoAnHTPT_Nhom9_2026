@@ -5,5 +5,6 @@
   <ItemGroup>
     <EmbeddedResource Include="../../database/migrations/001_initial.sql" LogicalName="De6.Schema.001.sql" />
     <EmbeddedResource Include="../../database/seed/001_seed.sql" LogicalName="De6.Seed.001.sql" />
+    <EmbeddedResource Include="../../database/oracle/001_local_invariants.sql" LogicalName="De6.Oracle.001.sql" />
   </ItemGroup>
 </Project>

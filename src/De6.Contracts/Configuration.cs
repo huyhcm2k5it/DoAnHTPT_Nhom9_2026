@@ -5,7 +5,9 @@ using System.Text.RegularExpressions;
 namespace De6.Contracts;
 
 public sealed record NodeEndpoint(int NodeId, string Host, int ClientPort, int PeerPort);
-public sealed record ServerOptions(int NodeId, Guid DatasetId, NodeEndpoint[] Nodes, string DataDirectory);
+// SQL credentials and arbitrary connection-string keys are deliberately not configuration fields.
+public sealed record SqlOptions(string Server, string Database, int ConnectTimeoutSeconds = 5);
+public sealed record ServerOptions(int NodeId, Guid DatasetId, NodeEndpoint[] Nodes, string DataDirectory, SqlOptions? Sql = null);
 public sealed record ClientOptions(int ClientId, string OwnerId, Guid DatasetId, NodeEndpoint[] Servers, string DataDirectory);
 
 public static class ConfigurationValidator
@@ -15,6 +17,18 @@ public static class ConfigurationValidator
         var errors = ValidateCommon(options.DatasetId, options.Nodes);
         if (options.NodeId is < 1 or > 3) errors.Add("NodeId must be 1, 2 or 3.");
         ValidateDirectory(options.DataDirectory, $"data/servers/s{options.NodeId}", errors);
+        if (options.Sql is not null)
+        {
+            // Shared memory has no remote endpoint or SQL alias/DNS ambiguity (V12 section 4).
+            if (options.Sql.Server is null || !Regex.IsMatch(options.Sql.Server,
+                @"\Alpc:(?:\.|\(local\))(?:\\[A-Za-z0-9_]{1,128})?\z", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
+                errors.Add("Sql.Server must be a local shared-memory endpoint such as 'lpc:.\\SQLEXPRESS'.");
+            if (options.Sql.Database is null || !Regex.IsMatch(options.Sql.Database,
+                @"\A(?:de_6|De6_[A-Za-z0-9_]{1,124})\z", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
+                errors.Add("Sql.Database must be de_6 or a De6_ application database (at most 128 ASCII characters).");
+            if (options.Sql.ConnectTimeoutSeconds is < 1 or > 30)
+                errors.Add("Sql.ConnectTimeoutSeconds must be 1..30.");
+        }
         return errors;
     }
 

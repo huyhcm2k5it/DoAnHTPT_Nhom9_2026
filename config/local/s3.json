@@ -21,5 +21,10 @@
       "peerPort": 9103
     }
   ],
-  "dataDirectory": "data/servers/s3"
+  "dataDirectory": "data/servers/s3",
+  "sql": {
+    "server": "lpc:.\\SQLEXPRESS",
+    "database": "De6_S3",
+    "connectTimeoutSeconds": 5
+  }
 }

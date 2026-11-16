@@ -8,6 +8,7 @@ namespace De6.Contracts;
 public static class BookingEventCodec
 {
     private static readonly JsonSerializerOptions Options = CreateOptions();
+    internal static byte[] CanonicalBytes<T>(T value)=>JsonSerializer.SerializeToUtf8Bytes(value,Options);
     private static JsonSerializerOptions CreateOptions()
     {
         var options=new JsonSerializerOptions

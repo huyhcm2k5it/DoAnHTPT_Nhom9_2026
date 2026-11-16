@@ -84,6 +84,7 @@ try
     Console.WriteLine("PASS H3 historical replay retains event epoch/identity without granting serving rights");
     await AdvancedCases.Run(server,applied.Event);
     await ReviewRegressionCases.Run(server,applied.Event);
+    await MaintenanceCases.Run(server);
     return 0;
 }
 catch (Exception exception)

@@ -31,6 +31,12 @@ public interface IBookingDecisionEngine
 /// Leases synchronize freeze/grants and stay held across await until disposed.
 /// EnterSnapshot must verify PRIMARY_READY and StableIndex == LastAppliedIndex == expectedIndex.
 /// EnterReplay must verify a locally installed, unexpired RecoveryContext on a closed node.
+/// EnterRecoveryInspection permits local evidence/audit reads while serving is closed; it does
+/// not prove a frozen prefix or grant permission to rebuild.
+/// EnterMaintenance is a trusted Control/Recovery grant: it must verify the node is closed,
+/// freeze at expectedIndex == LastAppliedIndex, and exclude mutation plus authority/grant
+/// transitions for the lease lifetime. It never enables serving. GetFrozenPrefix and rebuild
+/// require this lease; AuditLocal/EnterRecoveryInspection alone are not sufficient.
 /// Block must be safe to call while a lease is held. Store cannot prove network stability itself.
 /// </summary>
 public interface IStoreAccessGate
@@ -40,8 +46,18 @@ public interface IStoreAccessGate
     IDisposable EnterReplay(RecoveryContext context);
     IDisposable EnterSnapshot(long expectedIndex);
     IDisposable EnterRecoveryInspection();
+    IDisposable EnterMaintenance(long expectedIndex);
     void Block(string reason);
 }
+
+public sealed record DurableResultView(Guid RequestId,string OwnerId,string CommandHash,long LogIndex,ReadOnlyMemory<byte> ResultPayload);
+public sealed record StorageProjection(IReadOnlyList<SeatView> Seats,IReadOnlyList<ReservationData> Reservations,
+    IReadOnlyList<TicketData> Tickets,IReadOnlyList<DurableResultView> Results);
+public sealed record OracleViolation(string Invariant,long Count);
+public sealed record LocalStorageAudit(int NodeId,Guid DatasetId,long LocalAppliedIndex,ReadOnlyMemory<byte> HeadHash,
+    ReadOnlyMemory<byte> BusinessDigest,bool MatchesHistory,IReadOnlyList<OracleViolation> Violations);
+public sealed record FrozenPrefixReport(int NodeId,Guid DatasetId,int SchemaVersion,long Index,
+    ReadOnlyMemory<byte> HeadHash,ReadOnlyMemory<byte> BusinessDigest);
 
 public interface IBookingStore
 {

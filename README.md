@@ -4,11 +4,11 @@ Mô phỏng bán vé một chuyến tàu 10 ghế theo [đặc tả V12](docs/De
 
 ## Trạng thái hiện tại
 
-Đây là bộ khung để năm thành viên phát triển. Server chỉ kiểm tra cấu hình và báo `RECOVERING`, `ServingEnabled=false`; chưa lắng nghe như dịch vụ bán vé thực. WinForms có 10 ghế bị vô hiệu hóa và nhãn kết nối chưa triển khai. Nhánh feature/huy-database đã có component SQL Persistence H1–H4 và test SQL thật, chưa gắn vào Host; nghiệp vụ đầu cuối, TLS, bầu chọn và replication mạng còn phải triển khai. Không có kết quả FINAL giả. Các phép kiểm tra bootstrap không thay cho nghiệm thu T01–T36.
+Đây là bộ khung để năm thành viên phát triển. Server kiểm tra cấu hình, có probe SQL chỉ đọc khi được cấu hình, và báo `RECOVERING`, `ServingEnabled=false`; chưa lắng nghe như dịch vụ bán vé thực. WinForms có 10 ghế bị vô hiệu hóa và nhãn kết nối chưa triển khai. Nhánh feature/huy-database đã có component SQL Persistence H1–H6, oracle/rebuild, probe/composition SQL của Host và test SQL thật; chưa ghép luồng booking đầu cuối; nghiệp vụ đầu cuối, TLS, bầu chọn và replication mạng còn phải triển khai. Không có kết quả FINAL giả. Các phép kiểm tra bootstrap không thay cho nghiệm thu T01–T36.
 
 Đích triển khai là ba server có ba SQL Server 2022 độc lập và ba quầy A/B/C. Máy kiểm thử Persistence hiện là SQL Server 2025 Express, chưa xác nhận riêng trên engine 2022; build và chạy kiểm tra bộ khung hiện tại không cần cơ sở dữ liệu.
 
-Hướng dẫn phần Huy: [chạy H1–H4 và xem database trong SSMS](docs/implementation/HUY_WEEK1_RUNBOOK.md). SQL test riêng: `scripts/test-huy-sql.ps1`.
+Hướng dẫn phần Huy: [chạy H1–H4 và xem database trong SSMS](docs/implementation/HUY_WEEK1_RUNBOOK.md), [oracle/rebuild tuần 2](docs/implementation/HUY_WEEK2_RUNBOOK.md), và [hồ sơ hoàn tất H1–H6 kèm kết quả kiểm chứng](docs/implementation/HUY_COMPLETION_RECORD.md). SQL test riêng: `scripts/test-huy-sql.ps1`.
 
 ## Chuẩn bị và kiểm tra nhanh
 
@@ -28,7 +28,7 @@ dotnet --info
 .\scripts\start-client.ps1 -ClientId 3 -Check
 ```
 
-`test.ps1` chạy executable harness `tests/De6.Template.SmokeTests` và `tests/unit/De6.Persistence.Contracts.Tests`; đây không phải bộ test được `dotnet test` tự khám phá. `-Check` xác minh cấu hình rồi thoát, không mở giao diện hoặc tạo dịch vụ bán vé. Mỗi script trả exit code để phát hiện lỗi. Nếu chưa có SDK ở cả PATH lẫn `.tools/dotnet/`, cài/giải nén SDK .NET 10 tương thích trước khi chạy; script không tự cài phần mềm hay đổi execution policy.
+`test.ps1` build solution rồi chạy executable harness smoke, persistence contracts và Host/persistence offline; đây không phải bộ test được `dotnet test` tự khám phá. `test-huy-sql.ps1` chạy thêm Persistence và Host trên SQL Server thật bằng các database tạm. `-Check` xác minh cấu hình rồi thoát, không mở giao diện hoặc tạo dịch vụ bán vé. Mỗi script trả exit code để phát hiện lỗi. Nếu chưa có SDK ở cả PATH lẫn `.tools/dotnet/`, cài/giải nén SDK .NET 10 tương thích trước khi chạy; script không tự cài phần mềm hay đổi execution policy.
 
 Mở từng terminal riêng để quan sát tiến trình:
 

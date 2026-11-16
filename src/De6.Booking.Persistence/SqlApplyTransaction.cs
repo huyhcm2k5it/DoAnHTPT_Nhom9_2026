@@ -89,7 +89,7 @@ public sealed partial class SqlBookingStore
         return code==null ? null : new(code,1,e.CommandData.SeatNo,reservation,ticket);
     }
 
-    private async Task Apply(SqlConnection connection,SqlTransaction transaction,Node node,BookingEvent value,PersistedEvent entry,BookingState state)
+    private async Task Apply(SqlConnection connection,SqlTransaction transaction,Node node,BookingEvent value,PersistedEvent entry,BookingState state,bool appendLog=true)
     {
         if(value.Decision.Kind!=DecisionKind.NoChange)
         {
@@ -117,8 +117,9 @@ public sealed partial class SqlBookingStore
                     CancellationToken.None,("@id",ticket.TicketId),("@res",ticket.ReservationId),("@trip",ticket.TripId),
                     ("@seat",ticket.SeatNo),("@owner",ticket.OwnerId),("@utc",ticket.SoldUtc),("@idx",ticket.CreatedIndex));
         }
+        var logSql=appendLog?"INSERT dbo.OperationLog(LogIndex,EventId,Epoch,WriterId,RequestId,PreviousHash,EventHash,PayloadBytes) VALUES(@idx,@event,@epoch,@writer,@request,@prev,@hash,@payload); ":"";
         await SqlSupport.Execute(connection,transaction,
-            "INSERT dbo.OperationLog(LogIndex,EventId,Epoch,WriterId,RequestId,PreviousHash,EventHash,PayloadBytes) VALUES(@idx,@event,@epoch,@writer,@request,@prev,@hash,@payload); INSERT dbo.RequestResults(RequestId,OwnerId,CommandHash,LogIndex,ResultPayloadBytes) VALUES(@request,@owner,@commandHash,@idx,@result)",
+            logSql+"INSERT dbo.RequestResults(RequestId,OwnerId,CommandHash,LogIndex,ResultPayloadBytes) VALUES(@request,@owner,@commandHash,@idx,@result)",
             CancellationToken.None,("@idx",entry.LogIndex),("@event",entry.EventId),("@epoch",entry.Epoch),("@writer",entry.WriterId),
             ("@request",value.RequestId),("@prev",Convert.FromHexString(value.PreviousHash)),("@hash",entry.EventHash.ToArray()),
             ("@payload",entry.PayloadBytes.ToArray()),("@owner",value.OwnerId),("@commandHash",Convert.FromHexString(value.CommandHash)),("@result",entry.ResultPayload.ToArray()));

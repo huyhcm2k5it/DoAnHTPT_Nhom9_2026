@@ -1,8 +1,9 @@
 using System.Text.RegularExpressions;
 using De6.Booking.Persistence;
 using Microsoft.Data.SqlClient;
+using De6.Contracts;
 
-if(args.Length==0 || args[0] is not ("init" or "status")) return Usage();
+if(args.Length==0 || args[0] is not ("init" or "status" or "audit")) return Usage();
 try
 {
     var values=new Dictionary<string,string>(StringComparer.Ordinal);
@@ -60,9 +61,20 @@ try
     await using var row=await status.ExecuteReaderAsync();
     if(!await row.ReadAsync()) throw new InvalidDataException("NodeState missing");
     Console.WriteLine($"Database={database}; NodeId={row.GetInt32(0)}; DatasetId={row.GetGuid(1):D}; AcceptedEpoch={row.GetInt64(2)}; AcceptedLeader={(row.IsDBNull(3)?"NULL":row.GetInt32(3).ToString())}; LastAppliedIndex={row.GetInt64(4)}; SchemaVersion={row.GetInt32(5)}; Seats={row.GetInt32(6)}; Tickets={row.GetInt32(7)}");
+    if(args[0]=="audit")
+    {
+        var node=row.GetInt32(0);var dataset=row.GetGuid(1);
+        await row.DisposeAsync();
+        var store=new SqlBookingStore(new(builder.ConnectionString,dataset,node),new InspectionOnlyGate());
+        var audit=await store.AuditLocalAsync();
+        Console.WriteLine($"LOCAL ONLY K={audit.LocalAppliedIndex} HeadHash={Convert.ToHexStringLower(audit.HeadHash.Span)} Digest={Convert.ToHexStringLower(audit.BusinessDigest.Span)} MatchesHistory={audit.MatchesHistory}");
+        foreach(var violation in audit.Violations) Console.WriteLine($"VIOLATION {violation.Invariant} Count={violation.Count}");
+        Console.WriteLine("Local oracle cannot prove Stable, FINAL, fencing or cluster fault tolerance.");
+        return audit.MatchesHistory?0:1;
+    }
     return 0;
 }
-catch(Exception e) when(e is ArgumentException or InvalidDataException or InvalidOperationException or SqlException)
+catch(Exception e) when(e is ArgumentException or InvalidDataException or InvalidOperationException or SqlException or StoreRejectedException or StorageUncertainException)
 {
     Console.Error.WriteLine($"SQL setup failed: {e.Message}");
     return 2;
@@ -72,5 +84,20 @@ static int Usage()
 {
     Console.Error.WriteLine("De6.Sql.Tool init --database de_6 --node 1|2|3 --dataset GUID [--server local-instance] [--create]");
     Console.Error.WriteLine("De6.Sql.Tool status --database de_6 [--server local-instance]");
+    Console.Error.WriteLine("De6.Sql.Tool audit --database de_6 [--server local-instance]");
     return 2;
+}
+
+// Administration can read local evidence. This adapter grants no write, replay or maintenance rights.
+sealed class InspectionOnlyGate : IStoreAccessGate
+{
+    public IDisposable EnterRecoveryInspection()=>new Lease();
+    public IDisposable EnterPrimary(AcceptedAuthority authority,long expectedNextIndex)=>Denied();
+    public IDisposable EnterAppend(AuthenticatedPeerAuthority peer)=>Denied();
+    public IDisposable EnterReplay(RecoveryContext context)=>Denied();
+    public IDisposable EnterSnapshot(long expectedIndex)=>Denied();
+    public IDisposable EnterMaintenance(long expectedIndex)=>Denied();
+    public void Block(string reason) { }
+    private static IDisposable Denied()=>throw new StoreRejectedException(StoreRejection.NotReady);
+    private sealed class Lease : IDisposable {public void Dispose() { }}
 }
