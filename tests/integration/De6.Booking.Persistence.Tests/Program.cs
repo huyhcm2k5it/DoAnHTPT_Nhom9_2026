@@ -8,7 +8,7 @@ var database = "De6_HuyW1_Test_" + run;
 var connection = new SqlConnectionStringBuilder
 {
     DataSource = server, InitialCatalog = "master", IntegratedSecurity = true,
-    Encrypt = true, TrustServerCertificate = true, ConnectTimeout = 5, Pooling = false
+    Encrypt = true, TrustServerCertificate = true, ConnectTimeout = 15, Pooling = false
 };
 var created = false;
 try

@@ -10,7 +10,7 @@ internal sealed class TestDatabase : IAsyncDisposable
     private TestDatabase(string server)
     {
         builder=new() { DataSource=server,InitialCatalog="master",IntegratedSecurity=true,
-            Encrypt=true,TrustServerCertificate=true,ConnectTimeout=5,Pooling=false };
+            Encrypt=true,TrustServerCertificate=true,ConnectTimeout=15,Pooling=false };
     }
     internal static async Task<TestDatabase> Create(string server,int nodeId,bool activate=true,bool initialize=true)
     {

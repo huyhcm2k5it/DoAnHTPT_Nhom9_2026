@@ -119,7 +119,7 @@ internal sealed class ProbeDatabase : IAsyncDisposable
     internal string Name { get; }="De6_HostProbe_Test_"+Guid.NewGuid().ToString("N");
     internal const string ProbeApplicationName="De6HostProbeFixture";
     private readonly SqlConnectionStringBuilder builder=new() { DataSource=Environment.GetEnvironmentVariable("DE6_TEST_SQL_SERVER") ?? "lpc:.\\SQLEXPRESS",InitialCatalog="master",
-        IntegratedSecurity=true,Encrypt=true,TrustServerCertificate=true,ConnectTimeout=5,Pooling=false };
+        IntegratedSecurity=true,Encrypt=true,TrustServerCertificate=true,ConnectTimeout=15,Pooling=false };
     private bool created;
     internal string ConnectionString=>builder.ConnectionString;
     internal static async Task<ProbeDatabase> Create(bool initialize=true)
