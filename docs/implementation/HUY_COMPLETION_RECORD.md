@@ -52,4 +52,4 @@ Lần restore đầu bị lỗi do máy không truy cập được vulnerability
 - Review chéo của Gia Quân/Đức An/Nguyên Chương, test T01–T36 trên ba SQL Server độc lập và CI/PR về `develop` còn phải do nhóm thực hiện trước merge.
 - SQL Server 2025 Express là engine đã chạy kiểm thử; không suy rộng kết quả thành đã chạy SQL Server 2022.
 
-Commit hoàn tất tuần 2: sẽ điền sau bước commit trên nhánh `feature/huy-database`.
+Commit hoàn tất tuần 2: `f0ba4f0` (`feat(persistence): complete Huy week two SQL oracle and host wiring`), đã push lên `origin/feature/huy-database`. PR chưa mở vì phiên này không có GitHub CLI/connector và công cụ trình duyệt không khởi chạy được; link tạo PR: https://github.com/huyhcm2k5it/DoAnHTPT_Nhom9_2026/pull/new/feature/huy-database.

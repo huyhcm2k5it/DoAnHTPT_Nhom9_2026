@@ -46,8 +46,8 @@ Trạng thái cập nhật ngày 16 tháng 11 năm 2026. Người dùng đã ti�
 ### 5 Lưu Git và mở bàn giao
 
 - [x] Kiểm tra diff/file chưa track và `git diff --check`; `.tools`, `bin/obj`, DB, key và secret không nằm trong thay đổi dự kiến.
-- [ ] Tạo commit tuần 2 trên `feature/huy-database` và push nhánh. Mốc kiểm chứng và nội dung commit sẽ được ghi trong completion record sau khi commit.
-- [ ] Mở PR về `develop` và yêu cầu Gia Quân/Đức An/Nguyên Chương review hợp đồng dùng chung. Chưa tự merge; cần chờ review/CI của nhóm trước đó.
+- [x] Commit tuần 2 `f0ba4f0` trên `feature/huy-database` và push thành công lên `origin/feature/huy-database`.
+- [ ] Mở PR về `develop` và yêu cầu Gia Quân/Đức An/Nguyên Chương review hợp đồng dùng chung. Không có GitHub CLI/connector trong phiên; giao diện máy tính không khởi tạo được. Link tạo PR đã sẵn: https://github.com/huyhcm2k5it/DoAnHTPT_Nhom9_2026/pull/new/feature/huy-database. Không tự merge; chờ review/CI nhóm.
 
 ## Phần cần phối hợp sau khi Huy bàn giao
 
