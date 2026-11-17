@@ -4,7 +4,7 @@ using Microsoft.Data.SqlClient;
 
 namespace De6.Booking.Persistence;
 
-public sealed partial class SqlBookingStore : IBookingStore
+public sealed partial class SqlBookingStore : IBookingStore, IRecoveryEvidenceStore, IRecoveryManifestStore
 {
     private readonly SqlStoreOptions options;
     private readonly IStoreAccessGate gate;
@@ -60,7 +60,7 @@ public sealed partial class SqlBookingStore : IBookingStore
     private static void Require([System.Diagnostics.CodeAnalysis.DoesNotReturnIf(false)] bool condition,StoreRejection code,long? expected=null)
     { if(!condition) throw new StoreRejectedException(code,expected); }
 
-    private sealed record Node(long Epoch,int? Leader,long Index,byte[] Hash);
+    private sealed record Node(long Epoch,int? Leader,long Index,byte[] Hash,int SchemaVersion);
 
     // The caller holds a trusted gate lease; no network operation occurs in this SQL transaction.
     // Cancellation is honored before starting; admitted Apply is not abandoned after socket cancellation.
@@ -108,8 +108,8 @@ public sealed partial class SqlBookingStore : IBookingStore
         await using var reader=await command.ExecuteReaderAsync();
         Require(await reader.ReadAsync(),StoreRejection.NotReady);
         Require(reader.GetInt32(0)==options.NodeId && reader.GetGuid(1)==options.DatasetId,StoreRejection.DatasetMismatch);
-        Require(reader.GetInt32(6)==1,StoreRejection.NotReady);
-        return new(reader.GetInt64(2),reader.IsDBNull(3)?null:reader.GetInt32(3),reader.GetInt64(4),(byte[])reader[5]);
+        Require(reader.GetInt32(6)==2,StoreRejection.NotReady);
+        return new(reader.GetInt64(2),reader.IsDBNull(3)?null:reader.GetInt32(3),reader.GetInt64(4),(byte[])reader[5],reader.GetInt32(6));
     }
 
     private async Task<PersistedEvent?> FindEvent(SqlConnection connection,SqlTransaction transaction,string predicate,object id)

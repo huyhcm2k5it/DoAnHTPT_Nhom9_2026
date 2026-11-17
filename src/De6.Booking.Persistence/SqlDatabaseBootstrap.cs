@@ -14,64 +14,89 @@ public sealed class SqlDatabaseBootstrap(string connectionString)
         await using var connection = SqlSupport.Connection(connectionString);
         await connection.OpenAsync(cancellation);
         await SqlSupport.RequireDurable(connection, cancellation);
-        using var resource = Assembly.GetExecutingAssembly().GetManifestResourceStream("De6.Schema.001.sql")
-            ?? throw new InvalidOperationException("Missing embedded migration 001");
-        using var reader = new StreamReader(resource, Encoding.UTF8);
-        var script = await reader.ReadToEndAsync(cancellation);
-        using var seedResource=Assembly.GetExecutingAssembly().GetManifestResourceStream("De6.Seed.001.sql")
-            ?? throw new InvalidOperationException("Missing embedded seed 001");
-        using var seedReader=new StreamReader(seedResource,Encoding.UTF8);
-        var seedScript=await seedReader.ReadToEndAsync(cancellation);
-        var checksum = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(script+"\n--SEED--\n"+seedScript)));
+        var assembly = Assembly.GetExecutingAssembly();
+        var versionOneScript = await ReadResource(assembly, "De6.Schema.001.sql", cancellation);
+        var versionTwoScript = await ReadResource(assembly, "De6.Schema.002.sql", cancellation);
+        var seedScript = await ReadResource(assembly, "De6.Seed.001.sql", cancellation);
+        var versionOneChecksum = ComputeVersionOneChecksum(versionOneScript, seedScript);
+        var currentChecksum = ComputeCurrentChecksum(versionOneScript, versionTwoScript, seedScript);
+
         await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(IsolationLevel.Serializable, cancellation);
         await SqlSupport.Execute(connection, transaction,
             "DECLARE @r int; EXEC @r=sys.sp_getapplock @Resource='De6.Schema',@LockMode='Exclusive',@LockOwner='Transaction',@LockTimeout=10000; IF @r<0 THROW 51000,'Cannot acquire schema lock',1;", cancellation);
-        var version = await SqlSupport.Scalar(connection, transaction,
+        var versionValue = await SqlSupport.Scalar(connection, transaction,
             "SELECT CONVERT(int,value) FROM sys.extended_properties WHERE class=0 AND name=N'De6.SchemaVersion'", cancellation);
-        if (version == null)
+
+        if (versionValue is null or DBNull)
         {
             if (Convert.ToInt32(await SqlSupport.Scalar(connection, transaction,
                 "SELECT COUNT(*) FROM sys.tables WHERE is_ms_shipped=0", cancellation)) != 0)
                 throw new InvalidDataException("Refusing to initialize a database containing unrecognized tables");
-            await SqlSupport.Execute(connection, transaction, script, cancellation);
+
+            await SqlSupport.Execute(connection, transaction, versionOneScript, cancellation);
+            var seedHash = SeedHash(datasetId);
+            await SqlSupport.Execute(connection, transaction, seedScript, cancellation,
+                ("@node", nodeId), ("@dataset", datasetId), ("@hash", seedHash));
+            await SqlSupport.Execute(connection, transaction, versionTwoScript, cancellation);
             await SqlSupport.Execute(connection, transaction,
-                "EXEC sys.sp_addextendedproperty @name=N'De6.SchemaVersion',@value=1; EXEC sys.sp_addextendedproperty @name=N'De6.SchemaChecksum',@value=@checksum;",
-                cancellation, ("@checksum", checksum));
+                "EXEC sys.sp_addextendedproperty @name=N'De6.SchemaVersion',@value=2; EXEC sys.sp_addextendedproperty @name=N'De6.SchemaChecksum',@value=@checksum;",
+                cancellation, ("@checksum", currentChecksum));
         }
         else
         {
+            var version = Convert.ToInt32(versionValue);
             var oldChecksum = Convert.ToString(await SqlSupport.Scalar(connection, transaction,
                 "SELECT CONVERT(nvarchar(64),value) FROM sys.extended_properties WHERE class=0 AND name=N'De6.SchemaChecksum'", cancellation));
-            var tableCount = Convert.ToInt32(await SqlSupport.Scalar(connection, transaction,
-                "SELECT COUNT(*) FROM sys.tables WHERE schema_id=SCHEMA_ID('dbo') AND name IN ('Trips','Seats','Reservations','Tickets','OperationLog','RequestResults','NodeState')", cancellation));
-            if (Convert.ToInt32(version) != 1 || oldChecksum != checksum || tableCount != 7)
+            var baseTableCount = Convert.ToInt32(await SqlSupport.Scalar(connection, transaction,
+                "SELECT COUNT(*) FROM sys.tables WHERE schema_id=SCHEMA_ID('dbo') AND name IN ('Trips','Seats','Reservations','Tickets','OperationLog','RequestResults','NodeState','RecoveryManifest')", cancellation));
+
+            if (version == 1)
+            {
+                if (oldChecksum != versionOneChecksum || baseTableCount != 7)
+                    throw new InvalidDataException("Version-1 migration/checksum/schema mismatch; no automatic reset");
+                await SqlSupport.Execute(connection, transaction, versionTwoScript, cancellation);
+                await SqlSupport.Execute(connection, transaction,
+                    "EXEC sys.sp_updateextendedproperty @name=N'De6.SchemaVersion',@value=2; EXEC sys.sp_updateextendedproperty @name=N'De6.SchemaChecksum',@value=@checksum;",
+                    cancellation, ("@checksum", currentChecksum));
+            }
+            else if (version != 2 || oldChecksum != currentChecksum || baseTableCount != 8)
+            {
                 throw new InvalidDataException("Migration version/checksum/schema mismatch; no automatic reset");
+            }
         }
 
         using (var command = SqlSupport.Command(connection, transaction,
             "SELECT DatasetId,NodeId,SchemaVersion FROM dbo.NodeState WITH (UPDLOCK,HOLDLOCK) WHERE RowId=1"))
         await using (var state = await command.ExecuteReaderAsync(cancellation))
         {
+            if (!await state.ReadAsync(cancellation) || state.GetGuid(0) != datasetId ||
+                state.GetInt32(1) != nodeId || state.GetInt32(2) != 2)
+                throw new InvalidDataException("DatasetId/NodeId/schema mismatch; existing data preserved");
             if (await state.ReadAsync(cancellation))
-            {
-                if (state.GetGuid(0) != datasetId || state.GetInt32(1) != nodeId || state.GetInt32(2) != 1)
-                    throw new InvalidDataException("DatasetId/NodeId/schema mismatch; existing data preserved");
-            }
-        }
-        var rows = Convert.ToInt32(await SqlSupport.Scalar(connection, transaction, "SELECT COUNT(*) FROM dbo.NodeState", cancellation));
-        if (rows == 0)
-        {
-            var existing = Convert.ToInt32(await SqlSupport.Scalar(connection, transaction,
-                "SELECT (SELECT COUNT(*) FROM dbo.Trips)+(SELECT COUNT(*) FROM dbo.Seats)+(SELECT COUNT(*) FROM dbo.Reservations)+(SELECT COUNT(*) FROM dbo.Tickets)+(SELECT COUNT(*) FROM dbo.OperationLog)+(SELECT COUNT(*) FROM dbo.RequestResults)", cancellation));
-            if (existing != 0) throw new InvalidDataException("Refusing to seed over existing data without NodeState");
-            var seedHash = SHA256.HashData(Encoding.ASCII.GetBytes("PTIT-DE6-V12-SEED|" + datasetId.ToString("N")));
-            await SqlSupport.Execute(connection, transaction,
-                seedScript,
-                cancellation, ("@node", nodeId), ("@dataset", datasetId), ("@hash", seedHash));
+                throw new InvalidDataException("NodeState must have exactly one row.");
         }
         if (Convert.ToInt32(await SqlSupport.Scalar(connection, transaction,
             "SELECT COUNT(*) FROM dbo.Seats WHERE TripId=1 AND SeatNo BETWEEN 1 AND 10", cancellation)) != 10)
             throw new InvalidDataException("Seed integrity failure; existing data preserved");
         await transaction.CommitAsync(cancellation);
     }
+
+    private static async Task<string> ReadResource(Assembly assembly, string resourceName,
+        CancellationToken cancellation)
+    {
+        using var resource = assembly.GetManifestResourceStream(resourceName)
+            ?? throw new InvalidOperationException($"Missing embedded resource {resourceName}");
+        using var reader = new StreamReader(resource, Encoding.UTF8);
+        return await reader.ReadToEndAsync(cancellation);
+    }
+
+    private static byte[] SeedHash(Guid datasetId)
+        => SHA256.HashData(Encoding.ASCII.GetBytes("PTIT-DE6-V12-SEED|" + datasetId.ToString("N")));
+
+    private static string ComputeVersionOneChecksum(string migration, string seed)
+        => Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(migration + "\n--SEED--\n" + seed)));
+
+    private static string ComputeCurrentChecksum(string migrationOne, string migrationTwo, string seed)
+        => Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(
+            migrationOne + "\n--MIGRATION-002--\n" + migrationTwo + "\n--SEED--\n" + seed)));
 }

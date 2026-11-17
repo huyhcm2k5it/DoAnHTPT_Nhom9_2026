@@ -44,11 +44,17 @@ Cuối tuần 1 bàn giao bảng chuyển trạng thái, trace Bully và chữ k
 
 ## Tuần 2 — Chuyển quyền, replay và rejoin
 
+### Trạng thái trên `feature/duc-an-election`
+
+Đã triển khai phần lõi A4–A6: kiểm tra history đã freeze/audit tại từng index, so prefix và digest, yêu cầu `IPhysicalFenceVerifier` trước promotion, tạo/readback manifest trên từng SQL participant, ràng buộc replay với danh tính peer đã xác thực và `RecoveryContext`, cùng planner cho bootstrap/rejoin. Migration 002 thêm schema v2 và bảng `RecoveryManifest`; runner hỗ trợ tạo mới, nâng schema v1 có checksum đúng và từ chối schema lạ. `ClusterControl` chỉ mở sau khi verifier cấp authorization và local `LastAppliedIndex` khớp chính xác với K. API đọc manifest active hỗ trợ Host nhận biết một run bị gián đoạn; coordinator Host cần tiếp tục run với cùng `RunId`.
+
+Phần này vẫn chưa phải G3/G4 end-to-end: Host chưa có listener/receiver/administrative recovery workflow ghép đủ node; không có physical fence adapter thật; rejoin có tiền tố thì chỉ tạo context/manifest, còn suffix xung đột chỉ trả `RequiresArchiveRepair` và không archive/truncate tự động. SQL integration test đã được thêm nhưng cần chạy trên SQL Server có TLS được SqlClient hỗ trợ; lần chạy hiện tại bị môi trường báo không hỗ trợ encryption nên chưa thể tính là đã pass.
+
 | Việc | Nơi làm chính | Đầu ra để bàn giao |
 | --- | --- | --- |
-| A4 Fence, đối soát và manifest | `De6.Cluster.Control`, Host quản trị, `De6.Booking.Persistence`, migration theo phiên bản | Quy trình promote có kiểm chứng cách ly, so log và đọc lại manifest trên hai participant. |
-| A5 Quyền replay theo run | `De6.Cluster.Control`, receiver/SQL của Huy | `RecoveryContext` được cài cục bộ trên node đóng, có giới hạn nguồn, đích, mốc và thời hạn. |
-| A6 Bootstrap, restart và rejoin | Host, Control, SQL và các adapter mạng | Bootstrap dataset mới, tiếp tục run dở, đưa node cũ về đúng lịch sử, có trace và record. |
+| A4 Fence, đối soát và manifest | `De6.Cluster.Control`, Host quản trị, `De6.Booking.Persistence`, migration theo phiên bản | Đã có planner/verifier, SQL history checkpoint, manifest transaction và readback cục bộ. Còn cần Host fence/administration và kiểm G3 với hai SQL participant thật. |
+| A5 Quyền replay theo run | `De6.Cluster.Control`, receiver/SQL | Đã ràng buộc authenticated peer với source trong context và giữ gate đóng trong replay. Còn cần receiver/transport cài context từ run quản trị thật. |
+| A6 Bootstrap, restart và rejoin | Host, Control, SQL và các adapter mạng | Đã có planner bootstrap/rejoin, API đọc manifest active để Host nhận diện run bị gián đoạn, và từ chối suffix diverged. Chưa có coordinator Host tiếp tục run, archive `RepairPlan` hoặc quy trình Host chạy đủ ba node. |
 
 ### A4 Đối soát và chuyển quyền có kiểm soát
 

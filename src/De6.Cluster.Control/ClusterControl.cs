@@ -161,7 +161,7 @@ public sealed class ClusterControl : IAuthorityGate, IStoreAccessGate
         ArgumentNullException.ThrowIfNull(context);
         lock (_sync)
         {
-            if (_role is ServingRole.PrimaryReady or ServingRole.BackupReady || _activeLeases != 0)
+            if (_role is not (ServingRole.Recovering or ServingRole.Maintenance) || _activeLeases != 0)
                 throw new InvalidOperationException("Recovery context can only be installed on a closed node.");
             ValidateRecoveryContext(context, expiresAt);
             _installedRecoveryContext = CopyContext(context);
@@ -209,9 +209,13 @@ public sealed class ClusterControl : IAuthorityGate, IStoreAccessGate
         }
     }
 
-    public IDisposable EnterReplay(RecoveryContext context)
+    public IDisposable EnterReplay(AuthenticatedPeerIdentity authenticatedSource, RecoveryContext context)
     {
+        ArgumentNullException.ThrowIfNull(authenticatedSource);
         ArgumentNullException.ThrowIfNull(context);
+        if (authenticatedSource.NodeId != context.SourceNodeId)
+            throw new UnauthorizedAccessException("Replay source does not match the authenticated peer identity.");
+
         lock (_sync)
         {
             if (_role is ServingRole.PrimaryReady or ServingRole.BackupReady ||
@@ -246,7 +250,7 @@ public sealed class ClusterControl : IAuthorityGate, IStoreAccessGate
     {
         lock (_sync)
         {
-            if (_role == ServingRole.PrimaryReady || _activeLeases != 0 || _exclusiveLeaseActive)
+            if (_role is ServingRole.PrimaryReady or ServingRole.BackupReady || _activeLeases != 0 || _exclusiveLeaseActive)
                 throw new InvalidOperationException("Recovery inspection requires a closed node with no active storage operation.");
 
             _activeLeases++;
@@ -281,26 +285,35 @@ public sealed class ClusterControl : IAuthorityGate, IStoreAccessGate
 
     public void BlockUncertain() => Block("UNCERTAIN_OPERATION");
 
-    internal void ApplyVerifiedActivation(VerifiedActivation activation)
+    public void ApplyVerifiedActivation(RecoveryActivationAuthorization authorization)
     {
-        ArgumentNullException.ThrowIfNull(activation);
+        ArgumentNullException.ThrowIfNull(authorization);
+        var manifest = authorization.Manifest;
+        manifest.Validate();
+        if (!manifest.ParticipantNodeIds.Contains(_nodeId))
+            throw new UnauthorizedAccessException("This node is not a participant in the verified recovery manifest.");
+
         lock (_sync)
         {
-            if (_activeLeases != 0 || _role is ServingRole.PrimaryReady or ServingRole.BackupReady)
-                throw new InvalidOperationException("Activation requires a closed node with no active storage operation.");
-            if (activation.Role is not (ServingRole.PrimaryReady or ServingRole.BackupReady) ||
-                activation.Authority.Epoch <= 0 || activation.Authority.LeaderId is < 1 or > 3 ||
-                (activation.Role == ServingRole.PrimaryReady) != (activation.Authority.LeaderId == _nodeId) ||
-                activation.StableIndex < 0 || activation.StableIndex != activation.LastAppliedIndex)
-                throw new ArgumentException("Verified activation state is inconsistent.", nameof(activation));
-            if (_acceptedAuthority is { } accepted &&
-                activation.Authority.Epoch <= accepted.Epoch)
-                throw new InvalidOperationException("A node with persisted authority requires a strictly newer epoch before activation.");
+            if (_activeLeases != 0 || _role is not (ServingRole.Recovering or ServingRole.Maintenance))
+                throw new InvalidOperationException("Activation requires a recovering or maintenance node with no active storage operation.");
+            if (_lastAppliedIndex != manifest.TargetIndex)
+                throw new InvalidOperationException("Activation requires this node to have applied the exact manifest target prefix; replay or archive repair must finish first.");
+            if (manifest.Kind == RecoveryRunKind.Bootstrap)
+            {
+                if (_acceptedAuthority is not null && _acceptedAuthority != manifest.NewAuthority)
+                    throw new InvalidOperationException("Bootstrap cannot replace persisted authority on an existing dataset.");
+            }
+            else if (_acceptedAuthority != manifest.PreviousAuthority && _acceptedAuthority != manifest.NewAuthority)
+            {
+                throw new InvalidOperationException("Persisted authority is neither the run's old authority nor its exact read-back authority.");
+            }
+            if (_electionCandidateId is { } electionCandidate && electionCandidate != manifest.NewAuthority.LeaderId)
+                throw new InvalidOperationException("The verified manifest candidate differs from the local election result.");
 
-            _role = activation.Role;
-            _acceptedAuthority = activation.Authority;
-            _stableIndex = activation.StableIndex;
-            _lastAppliedIndex = activation.LastAppliedIndex;
+            _role = manifest.NewAuthority.LeaderId == _nodeId ? ServingRole.PrimaryReady : ServingRole.BackupReady;
+            _acceptedAuthority = manifest.NewAuthority;
+            _stableIndex = manifest.TargetIndex;
             _electionCandidateId = null;
             _electionRound = null;
             _installedRecoveryContext = null;
@@ -355,6 +368,3 @@ public sealed class ClusterControl : IAuthorityGate, IStoreAccessGate
         public void Dispose() => Interlocked.Exchange(ref _release, null)?.Invoke();
     }
 }
-
-internal sealed record VerifiedActivation(ServingRole Role, AcceptedAuthority Authority,
-    long StableIndex, long LastAppliedIndex);

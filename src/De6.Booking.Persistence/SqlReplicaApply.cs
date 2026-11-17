@@ -26,17 +26,22 @@ public sealed partial class SqlBookingStore
             return (receipt,(PersistedEvent?)entry);
         },value.RequestId,cancellation);
     }
-    public async Task<AppliedReceipt> ApplyReplayEntryAsync(PersistedEvent entry,RecoveryContext context,CancellationToken cancellation=default)
+    public async Task<AppliedReceipt> ApplyReplayEntryAsync(PersistedEvent entry,AuthenticatedPeerIdentity authenticatedSource,
+        RecoveryContext context,CancellationToken cancellation=default)
     {
         cancellation.ThrowIfCancellationRequested();
+        ArgumentNullException.ThrowIfNull(authenticatedSource);
+        ArgumentNullException.ThrowIfNull(context);
+        context=context with { BaseHash=context.BaseHash.ToArray(),HeadHash=context.HeadHash.ToArray() };
         entry=CopyEntry(entry);
         var value=DecodeEntry(entry);
-        using var lease=gate.EnterReplay(context);
+        using var lease=gate.EnterReplay(authenticatedSource,context);
         return await Transaction(async(connection,transaction,node)=>
         {
             Require(context.RunId!=Guid.Empty && context.DatasetId==options.DatasetId && value.DatasetId==options.DatasetId,
                 StoreRejection.DatasetMismatch);
-            Require(context.TargetNodeId==options.NodeId && context.SourceNodeId is >=1 and <=3 && context.SourceNodeId!=options.NodeId &&
+            Require(authenticatedSource.NodeId==context.SourceNodeId && context.TargetNodeId==options.NodeId &&
+                context.SourceNodeId is >=1 and <=3 && context.SourceNodeId!=options.NodeId &&
                 context.TargetLeaderId is >=1 and <=3 && context.TargetEpoch>0 && context.TargetEpoch>=node.Epoch && entry.Epoch<=context.TargetEpoch,
                 StoreRejection.StaleAuthority);
             Require(context.BaseIndex>=0 && context.TargetIndex>=context.BaseIndex && node.Index>=context.BaseIndex && node.Index<=context.TargetIndex &&

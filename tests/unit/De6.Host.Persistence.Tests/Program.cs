@@ -171,7 +171,7 @@ internal static class CompositionCases
         private static IDisposable Closed()=>throw new StoreRejectedException(StoreRejection.NotReady);
         public IDisposable EnterPrimary(AcceptedAuthority authority,long index)=>Closed();
         public IDisposable EnterAppend(AuthenticatedPeerAuthority peer)=>Closed();
-        public IDisposable EnterReplay(RecoveryContext context)=>Closed();
+        public IDisposable EnterReplay(AuthenticatedPeerIdentity authenticatedSource,RecoveryContext context)=>Closed();
         public IDisposable EnterSnapshot(long index)=>Closed();
         public IDisposable EnterRecoveryInspection()=>Closed();
         public IDisposable EnterMaintenance(long index)=>Closed();

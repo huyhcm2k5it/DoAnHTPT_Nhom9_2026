@@ -28,6 +28,9 @@ internal sealed class Checks
         await Run("A3 block is safe while inspection lease is held", BlockDuringInspection);
         await Run("A3 replay requires exact installed context and expiry", ReplayRequiresInstalledContext);
         await Run("A3 peer certificate maps to claimed remote NodeId", PeerCertificatePinning);
+        await Run("A4 promotion compares audited prefixes and requires physical fence", PromotionPlanRequiresCompatibleFencedNodes);
+        await Run("A4 activation requires exact manifest readback from every participant", ManifestReadbackIsAllOrNothing);
+        await Run("A6 bootstrap checks all three seeds and rejoin refuses divergent suffix", BootstrapAndRejoinAreFailClosed);
         await Run("A2 Bully chooses the highest eligible candidate", BullyChoosesHighestEligible);
         await Run("A2 coordinator may be highest among currently eligible nodes", BullyAcceptsHighestEligibleCoordinator);
         await Run("A2 a higher node answers once and starts its own round", HigherNodeAnswersAndStartsRound);
@@ -55,18 +58,29 @@ internal sealed class Checks
         Throws<ArgumentException>(() => new ClusterControl(1, _datasetId, new AcceptedAuthority(4, 0)));
 
         var control = NewControl(1, new AcceptedAuthority(7, 2), 12);
-        Throws<InvalidOperationException>(() => control.ApplyVerifiedActivation(new VerifiedActivation(
-            ServingRole.PrimaryReady, new AcceptedAuthority(6, 1), 12, 12)));
-        Throws<InvalidOperationException>(() => control.ApplyVerifiedActivation(new VerifiedActivation(
-            ServingRole.BackupReady, new AcceptedAuthority(7, 3), 12, 12)));
-        Throws<InvalidOperationException>(() => control.ApplyVerifiedActivation(new VerifiedActivation(
-            ServingRole.BackupReady, new AcceptedAuthority(7, 2), 12, 12)));
+        Throws<InvalidOperationException>(() => control.ApplyVerifiedActivation(Authorization(
+            PromotionManifest(new(5, 2), new(6, 1), [1, 3], 12))));
+        Throws<InvalidOperationException>(() => control.ApplyVerifiedActivation(Authorization(
+            PromotionManifest(new(6, 3), new(7, 1), [1, 2], 12))));
         Equal(ServingRole.Recovering, control.Snapshot.Role);
         Equal(new AcceptedAuthority(7, 2), control.Snapshot.AcceptedAuthority);
 
+        var restart = NewControl(1, new AcceptedAuthority(7, 2), 12);
+        restart.ApplyVerifiedActivation(Authorization(PromotionManifest(new(6, 3), new(7, 2), [1, 2], 12)));
+        Equal(ServingRole.BackupReady, restart.Snapshot.Role);
+
+        var blocked = NewControl(1, new AcceptedAuthority(7, 2), 12);
+        blocked.Block("UNCERTAIN_OPERATION");
+        Throws<InvalidOperationException>(() => blocked.ApplyVerifiedActivation(Authorization(
+            PromotionManifest(new(7, 2), new(8, 1), [1, 3], 12))));
+
+        var lagging = NewControl(1, new AcceptedAuthority(7, 2), 11);
+        Throws<InvalidOperationException>(() => lagging.ApplyVerifiedActivation(Authorization(
+            PromotionManifest(new(7, 2), new(8, 1), [1, 3], 12))));
+        Equal(ServingRole.Recovering, lagging.Snapshot.Role);
+
         var newerAuthority = NewControl(1, new AcceptedAuthority(7, 2), 12);
-        newerAuthority.ApplyVerifiedActivation(new VerifiedActivation(ServingRole.PrimaryReady,
-            new AcceptedAuthority(8, 1), 12, 12));
+        newerAuthority.ApplyVerifiedActivation(Authorization(PromotionManifest(new(7, 2), new(8, 1), [1, 3], 12)));
         Equal(ServingRole.PrimaryReady, newerAuthority.Snapshot.Role);
         Equal(new AcceptedAuthority(8, 1), newerAuthority.Snapshot.AcceptedAuthority);
         return Task.CompletedTask;
@@ -90,26 +104,34 @@ internal sealed class Checks
         Throws<InvalidOperationException>(() => control.EnterAppend(new AuthenticatedPeerAuthority(2, new AcceptedAuthority(1, 2))));
         Throws<InvalidOperationException>(() => control.EnterSnapshot(0));
         Throws<InvalidOperationException>(() => control.EnterMaintenance(0));
+
+        var backupManifest = ClusterRecoveryPlanner.PlanBootstrap(Guid.NewGuid(), new[]
+        {
+            History(1, null, 0, "seed"), History(2, null, 0, "seed"), History(3, null, 0, "seed")
+        });
+        var backup = NewControl(2);
+        backup.ApplyVerifiedActivation(Authorization(backupManifest));
+        Equal(ServingRole.BackupReady, backup.Snapshot.Role);
+        Throws<InvalidOperationException>(() => backup.EnterRecoveryInspection());
         return Task.CompletedTask;
     }
 
     private Task PrimaryGateEnforcesIndexes()
     {
-        var control = NewControl(1);
-        control.ApplyVerifiedActivation(new VerifiedActivation(ServingRole.PrimaryReady,
-            new AcceptedAuthority(1, 1), 4, 4));
+        var control = NewActivePrimary(4);
+        var authority = new AcceptedAuthority(2, 1);
 
         using (control.EnterSnapshot(4))
         {
-            Throws<InvalidOperationException>(() => control.EnterPrimary(new AcceptedAuthority(1, 1), 5));
+            Throws<InvalidOperationException>(() => control.EnterPrimary(authority, 5));
         }
 
-        using (control.EnterPrimary(new AcceptedAuthority(1, 1), 5))
+        using (control.EnterPrimary(authority, 5))
         {
-            Throws<InvalidOperationException>(() => control.EnterPrimary(new AcceptedAuthority(1, 1), 5));
+            Throws<InvalidOperationException>(() => control.EnterPrimary(authority, 5));
         }
         control.RecordLocalAppliedIndex(5);
-        Throws<InvalidOperationException>(() => control.EnterPrimary(new AcceptedAuthority(1, 1), 6));
+        Throws<InvalidOperationException>(() => control.EnterPrimary(authority, 6));
         control.PublishStableIndex(5);
         using (control.EnterSnapshot(5)) { }
 
@@ -120,14 +142,13 @@ internal sealed class Checks
 
     private async Task MaintenanceWaitsForLeases()
     {
-        var control = NewControl(1);
-        control.ApplyVerifiedActivation(new VerifiedActivation(ServingRole.PrimaryReady,
-            new AcceptedAuthority(1, 1), 0, 0));
+        var control = NewActivePrimary(0);
+        var authority = new AcceptedAuthority(2, 1);
         var lease = control.EnterSnapshot(0);
         var maintenance = control.BeginMaintenanceAsync(0);
         Equal(false, control.CanServe);
         Equal(false, maintenance.IsCompleted);
-        Throws<InvalidOperationException>(() => control.EnterPrimary(new AcceptedAuthority(1, 1), 1));
+        Throws<InvalidOperationException>(() => control.EnterPrimary(authority, 1));
         lease.Dispose();
         await maintenance;
         Equal(ServingRole.Maintenance, control.Snapshot.Role);
@@ -136,10 +157,8 @@ internal sealed class Checks
 
     private async Task MaintenanceBlocksUnstableApply()
     {
-        var control = NewControl(1);
-        control.ApplyVerifiedActivation(new VerifiedActivation(ServingRole.PrimaryReady,
-            new AcceptedAuthority(1, 1), 4, 4));
-        using (control.EnterPrimary(new AcceptedAuthority(1, 1), 5)) { }
+        var control = NewActivePrimary(4);
+        using (control.EnterPrimary(new AcceptedAuthority(2, 1), 5)) { }
         control.RecordLocalAppliedIndex(5);
         await ThrowsAsync<InvalidOperationException>(() => control.BeginMaintenanceAsync(5));
         Equal(ServingRole.BlockedUncertain, control.Snapshot.Role);
@@ -162,19 +181,21 @@ internal sealed class Checks
         var control = new ClusterControl(2, _datasetId, timeProvider: clock);
         var context = new RecoveryContext(Guid.NewGuid(), _datasetId, 1, 2, 2, 1, 0,
             new byte[32], 1, SHA256.HashData("target"u8));
-        Throws<InvalidOperationException>(() => control.EnterReplay(context));
+        var source = Identity(1);
+        Throws<InvalidOperationException>(() => control.EnterReplay(source, context));
         control.InstallRecoveryContext(context, clock.GetUtcNow().AddMinutes(1));
-        using (control.EnterReplay(context)) { }
+        Throws<UnauthorizedAccessException>(() => control.EnterReplay(Identity(3), context));
+        using (control.EnterReplay(source, context)) { }
 
         var wrongRun = context with { RunId = Guid.NewGuid() };
-        Throws<InvalidOperationException>(() => control.EnterReplay(wrongRun));
+        Throws<InvalidOperationException>(() => control.EnterReplay(source, wrongRun));
         control.RevokeRecoveryContext(context.RunId);
-        Throws<InvalidOperationException>(() => control.EnterReplay(context));
+        Throws<InvalidOperationException>(() => control.EnterReplay(source, context));
 
         var expiring = context with { RunId = Guid.NewGuid() };
         control.InstallRecoveryContext(expiring, clock.GetUtcNow().AddSeconds(1));
         clock.Advance(TimeSpan.FromSeconds(1));
-        Throws<InvalidOperationException>(() => control.EnterReplay(expiring));
+        Throws<InvalidOperationException>(() => control.EnterReplay(source, expiring));
         return Task.CompletedTask;
     }
 
@@ -187,6 +208,85 @@ internal sealed class Checks
         Equal(certificates.PinForNode(2), identity.CertificateSha256);
         Throws<UnauthorizedAccessException>(() => authenticator.Authenticate(certificates.ForNode(2), 3, DateTimeOffset.UtcNow));
         Throws<UnauthorizedAccessException>(() => authenticator.Authenticate(certificates.ForNode(1), 1, DateTimeOffset.UtcNow));
+        return Task.CompletedTask;
+    }
+
+    private Task PromotionPlanRequiresCompatibleFencedNodes()
+    {
+        var oldAuthority = new AcceptedAuthority(4, 3);
+        var longer = History(1, oldAuthority, 2, "shared");
+        var shorter = History(2, oldAuthority, 1, "shared");
+        var plan = ClusterRecoveryPlanner.PlanPromotion(Guid.NewGuid(), 2, longer, shorter,
+            new FenceEvidence(3, "ops-stop-2026-11-17-001", "Huy"), new TestFenceVerifier(true));
+
+        Equal(new AcceptedAuthority(5, 2), plan.Manifest.NewAuthority);
+        Equal(2L, plan.Manifest.TargetIndex);
+        Equal(1, plan.ReplaySourceNodeId);
+        Equal(2, plan.ReplayTargetNodeId);
+        Equal(1L, plan.ReplayContext!.BaseIndex);
+        Equal(2L, plan.ReplayContext.TargetIndex);
+        Equal(ServingRole.Recovering, NewControl(2, oldAuthority, 1).Snapshot.Role);
+
+        var divergent = History(2, oldAuthority, 1, "different");
+        Throws<InvalidDataException>(() => ClusterRecoveryPlanner.PlanPromotion(Guid.NewGuid(), 2,
+            longer, divergent, new FenceEvidence(3, "ops-stop", "Huy"), new TestFenceVerifier(true)));
+        Throws<UnauthorizedAccessException>(() => ClusterRecoveryPlanner.PlanPromotion(Guid.NewGuid(), 2,
+            longer, shorter, new FenceEvidence(3, "ops-stop", "Huy"), new TestFenceVerifier(false)));
+        Throws<InvalidDataException>(() => new RecoveryManifest(Guid.NewGuid(), _datasetId,
+            RecoveryRunKind.Promotion, oldAuthority, new AcceptedAuthority(5, 2), [2, 3], 1, 2,
+            longer.HeadHash, longer.BusinessDigest, "ops-stop", "Huy"));
+        return Task.CompletedTask;
+    }
+
+    private Task ManifestReadbackIsAllOrNothing()
+    {
+        var manifest = PromotionManifest(new AcceptedAuthority(4, 3), new AcceptedAuthority(5, 2), [1, 2], 2);
+        var readbacks = manifest.ParticipantNodeIds.Select(nodeId => new RecoveryManifestReadback(
+            nodeId, manifest, manifest.NewAuthority, manifest.SchemaVersion, manifest.TargetIndex,
+            manifest.HeadHash, manifest.BusinessDigest, auditVerified: true)).ToArray();
+        RecoveryActivationAuthorization Verify(RecoveryManifestReadback[] reports)
+            => RecoveryManifestReadbackVerifier.Verify(manifest, reports,
+                new FenceEvidence(manifest.PreviousAuthority!.LeaderId,
+                    manifest.FenceEvidenceReference!, manifest.FenceOperatorId!), new TestFenceVerifier(true));
+        var authorization = Verify(readbacks);
+        Equal(manifest, authorization.Manifest);
+
+        Throws<InvalidDataException>(() => Verify(readbacks[..1]));
+        var badReadback = readbacks[1];
+        readbacks[1] = new RecoveryManifestReadback(badReadback.NodeId, badReadback.Manifest,
+            new AcceptedAuthority(4, 3), badReadback.SchemaVersion, badReadback.LastAppliedIndex,
+            badReadback.HeadHash, badReadback.BusinessDigest, auditVerified: true);
+        Throws<InvalidDataException>(() => Verify(readbacks));
+        return Task.CompletedTask;
+    }
+
+    private Task BootstrapAndRejoinAreFailClosed()
+    {
+        var seedDigest = SHA256.HashData("seed-business"u8);
+        var bootstrap = ClusterRecoveryPlanner.PlanBootstrap(Guid.NewGuid(), new[]
+        {
+            History(1, null, 0, "seed", seedDigest),
+            History(2, null, 0, "seed", seedDigest),
+            History(3, null, 0, "seed", seedDigest)
+        });
+        Equal(new AcceptedAuthority(1, 3), bootstrap.NewAuthority);
+        var bootstrapProof = Authorization(bootstrap);
+        var primary = NewControl(3);
+        primary.ApplyVerifiedActivation(bootstrapProof);
+        Equal(ServingRole.PrimaryReady, primary.Snapshot.Role);
+        Equal(false, NewControl(1).CanServe);
+
+        var active = History(2, new AcceptedAuthority(5, 2), 2, "shared");
+        var returning = History(3, new AcceptedAuthority(4, 3), 1, "shared");
+        var rejoin = ClusterRecoveryPlanner.PlanRejoin(Guid.NewGuid(), active, returning);
+        Equal(RejoinPlanStatus.Ready, rejoin.Status);
+        Equal(1L, rejoin.ReplayContext!.BaseIndex);
+        Equal(2L, rejoin.ReplayContext.TargetIndex);
+        Equal(2, rejoin.ReplayContext.TargetLeaderId);
+
+        var divergent = History(3, new AcceptedAuthority(4, 3), 3, "old-longer-branch");
+        Equal(RejoinPlanStatus.RequiresArchiveRepair,
+            ClusterRecoveryPlanner.PlanRejoin(Guid.NewGuid(), active, divergent).Status);
         return Task.CompletedTask;
     }
 
@@ -330,6 +430,56 @@ internal sealed class Checks
         return Task.CompletedTask;
     }
 
+    private ClusterControl NewActivePrimary(long index)
+    {
+        var oldAuthority = new AcceptedAuthority(1, 3);
+        var manifest = PromotionManifest(oldAuthority, new AcceptedAuthority(2, 1), [1, 2], index);
+        var control = NewControl(1, oldAuthority, index);
+        control.ApplyVerifiedActivation(Authorization(manifest));
+        return control;
+    }
+
+    private RecoveryManifest PromotionManifest(AcceptedAuthority previous, AcceptedAuthority next,
+        int[] participants, long index)
+    {
+        var head = SHA256.HashData(BitConverter.GetBytes(index + 100));
+        var digest = SHA256.HashData(BitConverter.GetBytes(index + 200));
+        return new RecoveryManifest(Guid.NewGuid(), _datasetId, RecoveryRunKind.Promotion,
+            previous, next, participants, 1, index, head, digest,
+            "test-fence-reference", "test-operator");
+    }
+
+    private VerifiedRecoveryHistory History(int nodeId, AcceptedAuthority? authority, long lastIndex,
+        string branch, byte[]? seedDigest = null)
+    {
+        var checkpoints = new List<RecoveryHistoryCheckpoint>();
+        var head = ClusterRecoveryPlanner.SeedHash(_datasetId);
+        var digest = seedDigest ?? SHA256.HashData(System.Text.Encoding.UTF8.GetBytes($"seed:{_datasetId:N}"));
+        checkpoints.Add(new RecoveryHistoryCheckpoint(0, ReadOnlyMemory<byte>.Empty, head, digest));
+        for (var index = 1; index <= lastIndex; index++)
+        {
+            var previous = head;
+            head = SHA256.HashData(System.Text.Encoding.UTF8.GetBytes($"{branch}:head:{index}"));
+            digest = SHA256.HashData(System.Text.Encoding.UTF8.GetBytes($"{branch}:digest:{index}"));
+            checkpoints.Add(new RecoveryHistoryCheckpoint(index, previous, head, digest));
+        }
+        return new VerifiedRecoveryHistory(nodeId, _datasetId, 1, authority, lastIndex,
+            head, digest, auditVerified: true, frozen: true, checkpoints);
+    }
+
+    private static RecoveryActivationAuthorization Authorization(RecoveryManifest manifest)
+    {
+        var readbacks = manifest.ParticipantNodeIds.Select(nodeId => new RecoveryManifestReadback(
+            nodeId, manifest, manifest.NewAuthority, manifest.SchemaVersion, manifest.TargetIndex,
+            manifest.HeadHash, manifest.BusinessDigest, auditVerified: true));
+        FenceEvidence? evidence = manifest.Kind == RecoveryRunKind.Promotion
+            ? new FenceEvidence(manifest.PreviousAuthority!.LeaderId,
+                manifest.FenceEvidenceReference!, manifest.FenceOperatorId!)
+            : null;
+        return RecoveryManifestReadbackVerifier.Verify(manifest, readbacks, evidence,
+            manifest.Kind == RecoveryRunKind.Promotion ? new TestFenceVerifier(true) : null);
+    }
+
     private ClusterControl NewControl(int nodeId, AcceptedAuthority? authority = null, long lastAppliedIndex = 0)
         => new(nodeId, _datasetId, authority, lastAppliedIndex);
 
@@ -379,6 +529,12 @@ internal sealed class Checks
         catch (TException) { return; }
         throw new InvalidOperationException($"Expected {typeof(TException).Name}.");
     }
+}
+
+internal sealed class TestFenceVerifier(bool accepted) : IPhysicalFenceVerifier
+{
+    public bool Verify(FenceEvidence evidence, int expectedFormerLeaderNodeId)
+        => accepted && evidence.FormerLeaderNodeId == expectedFormerLeaderNodeId;
 }
 
 internal sealed class RecordingElectionTransport : IElectionTransport

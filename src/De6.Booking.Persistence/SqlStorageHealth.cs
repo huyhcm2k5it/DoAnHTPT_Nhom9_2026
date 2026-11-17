@@ -30,9 +30,9 @@ public sealed class SqlStorageHealth
         var checksum=await SqlSupport.Scalar(connection,transaction,
             "SELECT CONVERT(nvarchar(64),value) FROM sys.extended_properties WHERE class=0 AND name=N'De6.SchemaChecksum'",cancellation);
         var tables=await SqlSupport.Scalar(connection,transaction,
-            "SELECT COUNT(*) FROM sys.tables WHERE schema_id=SCHEMA_ID('dbo') AND name IN ('Trips','Seats','Reservations','Tickets','OperationLog','RequestResults','NodeState')",cancellation);
-        if(version is null or DBNull || Convert.ToInt32(version)!=1 ||
-            !string.Equals(Convert.ToString(checksum),await ExpectedSchemaChecksum(cancellation),StringComparison.Ordinal) || Convert.ToInt32(tables)!=7)
+            "SELECT COUNT(*) FROM sys.tables WHERE schema_id=SCHEMA_ID('dbo') AND name IN ('Trips','Seats','Reservations','Tickets','OperationLog','RequestResults','NodeState','RecoveryManifest')",cancellation);
+        if(version is null or DBNull || Convert.ToInt32(version)!=2 ||
+            !string.Equals(Convert.ToString(checksum),await ExpectedSchemaChecksum(cancellation),StringComparison.Ordinal) || Convert.ToInt32(tables)!=8)
             throw new InvalidDataException("Existing SQL schema version/checksum/tables do not match; initialize or investigate separately.");
 
         SqlStorageHealthReport report;
@@ -44,11 +44,11 @@ public sealed class SqlStorageHealth
         await using(var reader=await command.ExecuteReaderAsync(cancellation))
         {
             if(!await reader.ReadAsync(cancellation)) throw new InvalidDataException("NodeState is missing; probe does not seed databases.");
-            if(reader.GetByte(0)!=1 || reader.GetInt32(1)!=options.NodeId || reader.GetGuid(2)!=options.DatasetId || reader.GetInt32(3)!=1)
+            if(reader.GetByte(0)!=1 || reader.GetInt32(1)!=options.NodeId || reader.GetGuid(2)!=options.DatasetId || reader.GetInt32(3)!=2)
                 throw new InvalidDataException("NodeState DatasetId/NodeId/schema does not match configuration.");
             var index=reader.GetInt64(4); var hash=(byte[])reader[5];
             if(index<0 || hash.Length!=32) throw new InvalidDataException("Invalid local applied metadata.");
-            report=new(options.NodeId,options.DatasetId,1,index,hash,Convert.ToInt32(delayed));
+            report=new(options.NodeId,options.DatasetId,2,index,hash,Convert.ToInt32(delayed));
             if(await reader.ReadAsync(cancellation)) throw new InvalidDataException("NodeState must have exactly one row.");
         }
         using(var command=SqlSupport.Command(connection,transaction,
@@ -72,11 +72,14 @@ public sealed class SqlStorageHealth
     private static async Task<string> ExpectedSchemaChecksum(CancellationToken cancellation)
     {
         var assembly=Assembly.GetExecutingAssembly();
-        using var migration=assembly.GetManifestResourceStream("De6.Schema.001.sql") ?? throw new InvalidOperationException("Missing migration resource.");
+        using var migrationOne=assembly.GetManifestResourceStream("De6.Schema.001.sql") ?? throw new InvalidOperationException("Missing migration 001 resource.");
+        using var migrationTwo=assembly.GetManifestResourceStream("De6.Schema.002.sql") ?? throw new InvalidOperationException("Missing migration 002 resource.");
         using var seed=assembly.GetManifestResourceStream("De6.Seed.001.sql") ?? throw new InvalidOperationException("Missing seed resource.");
-        using var migrationReader=new StreamReader(migration,Encoding.UTF8);
+        using var migrationOneReader=new StreamReader(migrationOne,Encoding.UTF8);
+        using var migrationTwoReader=new StreamReader(migrationTwo,Encoding.UTF8);
         using var seedReader=new StreamReader(seed,Encoding.UTF8);
-        var content=await migrationReader.ReadToEndAsync(cancellation)+"\n--SEED--\n"+await seedReader.ReadToEndAsync(cancellation);
+        var content=await migrationOneReader.ReadToEndAsync(cancellation)+"\n--MIGRATION-002--\n"+
+            await migrationTwoReader.ReadToEndAsync(cancellation)+"\n--SEED--\n"+await seedReader.ReadToEndAsync(cancellation);
         return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(content)));
     }
 }

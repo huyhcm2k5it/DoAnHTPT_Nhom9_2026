@@ -56,7 +56,8 @@ internal static class ReviewRegressionCases
             var context=new RecoveryContext(Guid.NewGuid(),Dataset,1,3,2,2,0,
                 Convert.FromHexString(BookingEventCodec.Decode(first.Event).PreviousHash),4,fourth.Event.EventHash);
             var replay=new SqlBookingStore(new(replayDb.ConnectionString,Dataset,3),new TestGate{InstalledRecovery=context});
-            foreach(var entry in entries) await replay.ApplyReplayEntryAsync(entry,context);
+            var replaySource=TestPeerIdentityFactory.Create(3,1);
+            foreach(var entry in entries) await replay.ApplyReplayEntryAsync(entry,replaySource,context);
             await Ticks(replayDb.ConnectionString,"SELECT CreatedUtc FROM dbo.Reservations WHERE SeatNo=2");
             await Ticks(replayDb.ConnectionString,"SELECT SoldUtc FROM dbo.Tickets WHERE SeatNo=1");
         });
@@ -89,7 +90,7 @@ internal static class ReviewRegressionCases
             await MustCancel(async()=>{await store.ReadStableResultAsync(id,"A",0,token);});
             await MustCancel(async()=>{await store.ReadMyReservationsAsync("A",0,token);});
             await MustCancel(async()=>{await store.AppendAndApplyAsync(original,new(1,new(1,1)),token);});
-            await MustCancel(async()=>{await store.ApplyReplayEntryAsync(original,context,token);});
+            await MustCancel(async()=>{await store.ApplyReplayEntryAsync(original,TestPeerIdentityFactory.Create(3,1),context,token);});
             await MustCancel(async()=>{await store.InspectLocalRequestAsync(id,token);});
             SqlTest.Require(gate.Admissions==0 && !gate.Blocked,"Cancelled API acquired a gate");
         });
@@ -105,7 +106,7 @@ internal static class ReviewRegressionCases
         await Case("changed "+marker+" is refused without reseeding",async()=>
         {
             await using var db=await TestDatabase.Create(server,1);
-            var value=marker.EndsWith("Checksum",StringComparison.Ordinal)?"N'tampered'":"2";
+            var value=marker.EndsWith("Checksum",StringComparison.Ordinal)?"N'tampered'":"3";
             await SqlTest.Execute(db.ConnectionString,$"EXEC sys.sp_updateextendedproperty @name=N'{marker}',@value={value}");
             await Refuse(new(db.ConnectionString));
             SqlTest.Require(Convert.ToInt32(await SqlTest.Scalar(db.ConnectionString,"SELECT COUNT(*) FROM dbo.Seats"))==10,"Refusal changed seed data");
