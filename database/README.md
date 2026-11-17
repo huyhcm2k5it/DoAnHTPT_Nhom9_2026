@@ -1,9 +1,5 @@
-# SQL implementation workspace
+# Lưu trữ SQL của Huy
 
-Owner: Huy. No executable SQL schema, migration, seed or oracle is supplied. Building the solution and running startup checks do not connect to SQL, create tables, seed data or verify durability.
+Schema v1 ở migrations/001_initial.sql, seed có kiểm soát ở seed/001_seed.sql. SqlDatabaseBootstrap nhúng hai script, chạy transaction và version/checksum, không reset dataset/NodeId khác. Seed không cấp quyền writer.
 
-Follow [V12 sections 8-9, 11, 14, 17](../docs/De6_Thiet_Ke_Trien_Khai_V12.md). Keep schema definitions, ordered migrations, controlled seed and read-only oracle separate. Credentials/connection strings/private keys stay outside Git. Each server owns a separate SQL Server 2022 database on its own machine; clients never connect to SQL.
-
-Before integration, implement atomic event/projection/result/NodeState Apply, strict request identity, canonical bytes and fully durable commit. Test SQL exceptions with an uncertain commit outcome. Do not hold a SQL transaction while waiting for TCP. SQL UNIQUE constraints are local barriers, not distributed mutual exclusion.
-
-Hướng dẫn thao tác và bàn giao theo người: [Phân công chi tiết](../docs/team/Phan_Cong_Nhom9.md). Mục 9–12 nêu thứ tự ghép, test project cần tạo, record và checklist PR. Bộ test nghiệp vụ tương lai phải được nối vào script/CI bằng lệnh thực; không suy PASS từ bootstrap.
+Chạy scripts/init-huy-sql.ps1 và scripts/test-huy-sql.ps1 theo [runbook](../docs/implementation/HUY_WEEK1_RUNBOOK.md). Mỗi server dùng DB riêng. Client không giữ SQL credentials. Oracle và rebuild projection H5 đã được cài, có kiểm thử SQL; xem docs/implementation/HUY_WEEK2_RUNBOOK.md. Full cluster recovery/promotion vẫn cần Control và các module liên quan.

@@ -1,5 +1,5 @@
-# Controlled seed to implement
+# Seed có kiểm soát
 
-Owner: Huy, coordinated with Đức An. V12 section 17 allows initial seed only after all three databases are verified to be a new dataset. Use the SAME configured DatasetId and exactly ten AVAILABLE seats, K=0 and the V12 SeedHash. Do not auto-seed or regenerate DatasetId on restart. Existing nonempty histories require recovery, not reseeding.
+001_seed.sql được SqlDatabaseBootstrap gọi sau khi xác minh DB trống hoặc đúng dataset/node hiện hành. Các parameter @node, @dataset, @hash do runner cấp. Tạo một chuyến, 10 AVAILABLE seats, SeedHash và NodeState có AcceptedEpoch=0/AcceptedLeader=NULL. Chạy lại không xóa vé/log/giữ ghế đã có, không đổi DatasetId.
 
-No seed script is supplied. Initial activation is separate from seed: verify all three replicas and persist/read back epoch 1 / leader S3 under the trusted operator workflow. Bully candidate nomination alone cannot open serving.
+Không chạy seed thô để reset demo. Cấp quyền ban đầu là bước Control riêng, cần kiểm tra cả ba replica theo V12. Xem [runbook](../../docs/implementation/HUY_WEEK1_RUNBOOK.md).

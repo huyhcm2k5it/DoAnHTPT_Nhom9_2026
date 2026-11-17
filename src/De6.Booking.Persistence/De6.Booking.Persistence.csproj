@@ -1,4 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup>
   <ItemGroup><ProjectReference Include="../De6.Contracts/De6.Contracts.csproj" /></ItemGroup>
+  <ItemGroup><PackageReference Include="Microsoft.Data.SqlClient" Version="7.1.2" /></ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="../../database/migrations/001_initial.sql" LogicalName="De6.Schema.001.sql" />
+    <EmbeddedResource Include="../../database/seed/001_seed.sql" LogicalName="De6.Seed.001.sql" />
+    <EmbeddedResource Include="../../database/oracle/001_local_invariants.sql" LogicalName="De6.Oracle.001.sql" />
+  </ItemGroup>
 </Project>

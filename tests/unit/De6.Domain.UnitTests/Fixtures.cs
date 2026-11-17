@@ -47,7 +47,7 @@ public sealed class FakeAuthorityGate : IAuthorityGate
     public void BlockUncertain() => CanServe = false;
 }
 
-public sealed class FakeBookingStore : IBookingStore
+public sealed class FakeBookingStore : De6.Booking.Domain.IBookingStore
 {
     public readonly ConcurrentDictionary<int, SeatView> Seats = new();
     public readonly ConcurrentDictionary<Guid, ReservationRecord> Reservations = new();
