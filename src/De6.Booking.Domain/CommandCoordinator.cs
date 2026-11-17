@@ -143,6 +143,34 @@ public sealed class CommandCoordinator : ICommandCoordinator
         finally { _mutationLock.Release(); }
     }
 
+    public async Task<IReadOnlyList<ReservationRecord>> GetMyReservationsAsync(string authenticatedOwnerId, CancellationToken cancellationToken = default)
+    {
+        if (!_authorityGate.CanServe)
+            throw new InvalidOperationException("Cluster is not ready to serve authoritative reads.");
+
+        if (string.IsNullOrWhiteSpace(authenticatedOwnerId))
+            return Array.Empty<ReservationRecord>();
+
+        await _mutationLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (!_authorityGate.CanServe)
+                throw new InvalidOperationException("Cluster is not ready to serve authoritative reads.");
+
+            var epoch = _authorityGate.CurrentEpoch;
+            var reservations = await _store.GetReservationsByOwnerAsync(authenticatedOwnerId, cancellationToken).ConfigureAwait(false);
+
+            if (!_authorityGate.CanServe || _authorityGate.CurrentEpoch != epoch)
+                throw new InvalidOperationException("Cluster is not ready to serve authoritative reads.");
+
+            return reservations;
+        }
+        finally
+        {
+            _mutationLock.Release();
+        }
+    }
+
     private async Task ProcessQueueAsync()
     {
         var reader = _queue.Reader;
