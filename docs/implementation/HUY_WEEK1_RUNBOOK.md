@@ -94,7 +94,7 @@ Gia Quân cài IBookingDecisionEngine thật: quyết định đồng bộ trên
 
 Đức An cấp IStoreAccessGate thật, không có gate mở mặc định. Primary lease gắn grant; snapshot lease chỉ cho PRIMARY_READY và StableIndex=LastAppliedIndex; replay cần context cài cục bộ trên node đóng gate. Lease an toàn qua await và đồng bộ freeze; Block không được deadlock khi đang giữ lease.
 
-Nguyên Chương truyền nguyên PersistedEvent bytes. Chỉ gửi ACK sau AppendAndApplyAsync trả receipt; phân biệt AuthorityEpoch/EventEpoch. Replay dùng API riêng, không nới điều kiện append mới.
+Gia Quân gửi nguyên PersistedEvent bytes tới receiver của Huy. Chỉ trả ACK sau `AppendAndApplyAsync` thành công; phân biệt AuthorityEpoch/EventEpoch. Đức An cấp context replay riêng, không nới điều kiện append mới.
 
 Store không gọi mạng trong SQL transaction. Operation đã bắt đầu không bị bỏ vì socket mất; token từ coordinator phải tách khỏi socket cancellation. StorageUncertainException thông báo gate đã đóng: inspect log bằng đường quản trị, không tự cấp EventId mới/mở phục vụ lại. Tìm được result local chưa đủ FINAL.
 

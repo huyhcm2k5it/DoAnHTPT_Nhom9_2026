@@ -35,6 +35,6 @@ Test dùng DB tạm để tạo corruption, kiểm tra oracle, inject lỗi trư
 
 Các executable harness không được dotnet test tự khám phá. SQL là thật; gate/decision fixture chỉ thay module chưa cài của các bạn khác. T01–T36 còn cần coordinator, network, Control và client thật. Hướng dẫn Host/probe được bổ sung trong tài liệu HUY_HOST_SQL.md.
 
-Gia Quân review Contracts/digest và transaction; Đức An review maintenance/grant/replay/metadata; Nguyên Chương review prefix/bytes/ACK. Không bỏ review của các bên dùng hợp đồng trước khi merge develop.
+Gia Quân review Contracts/digest, sender và transaction; Đức An review maintenance/grant/replay/metadata; Văn Khoa review frame/TLS. Không bỏ review chéo của các module dùng hợp đồng trước khi tích hợp.
 
 Kết quả chạy bản ghép cuối, môi trường, trạng thái `de_6`, các review finding đã sửa và giới hạn được ghi trong [HUY_COMPLETION_RECORD.md](HUY_COMPLETION_RECORD.md).

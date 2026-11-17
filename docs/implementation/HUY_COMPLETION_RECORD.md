@@ -52,7 +52,7 @@ Trong lượt kiểm thử mới, ba ca SQL regression timeout ở post-login do
 ## Giới hạn bàn giao
 
 - Host vẫn khởi động đóng; chưa có listener bán vé, coordinator, production decision engine/gate, Bully/election, replication TCP/TLS, activation hay client end-to-end.
-- Review chéo của Gia Quân/Đức An/Nguyên Chương, test T01–T36 trên ba SQL Server độc lập và CI/PR về `develop` còn phải do nhóm thực hiện trước merge.
+- Review chéo của Gia Quân/Đức An/Văn Khoa, test T01–T36 trên ba SQL Server độc lập và CI/PR về `develop` còn phải do nhóm thực hiện trước merge.
 - SQL Server 2025 Express là engine đã chạy kiểm thử; không suy rộng kết quả thành đã chạy SQL Server 2022.
 
 Commit implementation tuần 2: `f0ba4f0`; commit ổn định test fixtures: `6fc30b3`; cả hai đã push lên `origin/feature/huy-database`. PR chưa mở vì phiên này không có GitHub CLI/connector và công cụ trình duyệt không khởi chạy được; link tạo PR: https://github.com/huyhcm2k5it/DoAnHTPT_Nhom9_2026/pull/new/feature/huy-database.

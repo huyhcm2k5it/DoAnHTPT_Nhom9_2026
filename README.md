@@ -4,7 +4,7 @@ Mô phỏng bán vé một chuyến tàu 10 ghế theo [đặc tả V12](docs/De
 
 ## Trạng thái hiện tại
 
-Đây là bộ khung để năm thành viên phát triển. Server kiểm tra cấu hình, có probe SQL chỉ đọc khi được cấu hình, và báo `RECOVERING`, `ServingEnabled=false`; chưa lắng nghe như dịch vụ bán vé thực. WinForms có 10 ghế bị vô hiệu hóa và nhãn kết nối chưa triển khai. Nhánh feature/huy-database đã có component SQL Persistence H1–H6, oracle/rebuild, probe/composition SQL của Host và test SQL thật; chưa ghép luồng booking đầu cuối; nghiệp vụ đầu cuối, TLS, bầu chọn và replication mạng còn phải triển khai. Không có kết quả FINAL giả. Các phép kiểm tra bootstrap không thay cho nghiệm thu T01–T36.
+Đây là bộ khung để bốn thành viên phát triển. Server kiểm tra cấu hình, có probe SQL chỉ đọc khi được cấu hình, và báo `RECOVERING`, `ServingEnabled=false`; chưa lắng nghe như dịch vụ bán vé thực. WinForms có 10 ghế bị vô hiệu hóa và nhãn kết nối chưa triển khai. Nhánh feature/huy-database đã có component SQL Persistence H1–H6, oracle/rebuild, probe/composition SQL của Host và test SQL thật; chưa ghép luồng booking đầu cuối; TLS, bầu chọn và replication mạng còn phải triển khai. Không có kết quả FINAL giả. Các phép kiểm tra bootstrap không thay cho nghiệm thu T01–T36.
 
 Đích triển khai là ba server có ba SQL Server 2022 độc lập và ba quầy A/B/C. Máy kiểm thử Persistence hiện là SQL Server 2025 Express, chưa xác nhận riêng trên engine 2022; build và chạy kiểm tra bộ khung hiện tại không cần cơ sở dữ liệu.
 
@@ -114,21 +114,20 @@ Demo vật lý: M1=S1/SQL1, M2=S2/SQL2, M3=S3/SQL3, M4=C1/A, M5=C2/B và C3/C. T
 | Huy | SQL/Persistence, oracle; điều phối tích hợp | `feature/huy-database` |
 | Gia Quân | Domain, coordinator và dedup | `feature/gia-quan-domain` |
 | Đức An | Bully, Cluster.Control và quyền phục vụ | `feature/duc-an-election` |
-| Nguyên Chương | Replication và Transport.Tcp | `feature/nguyen-chuong-replication` |
 | Văn Khoa | Client.Sdk, pending và WinForms | `feature/van-khoa-client` |
 
-**Cả năm thành viên đều trực tiếp viết code, test và có PR riêng.** Không ai chỉ làm báo cáo, QA hay tích hợp: Huy cài SQL/Apply; Văn Khoa cài SDK/UI/pending; các thành viên còn lại cài module được giao. Mỗi người bàn giao ít nhất một luồng chức năng qua các module liên quan trong phạm vi mình phụ trách, có test và reviewer; bằng chứng là PR, file code và kết quả test, không lấy số commit làm thước đo đóng góp.
+**Bốn thành viên hiện tại đều trực tiếp viết code, test và bàn giao phần của mình.** Không ai chỉ làm báo cáo, QA hay tích hợp. Huy phụ trách SQL/Apply và receiver; Gia Quân phụ trách Domain/Contracts và sender; Đức An phụ trách Bully, Control và xác thực peer; Văn Khoa phụ trách SDK/UI, framing TCP và kết nối client. Mỗi người bàn giao luồng chức năng, test, reviewer và phần lý thuyết gắn với code.
 
 Mỗi người tạo PR từ nhánh feature vào `develop`, được reviewer module liên quan duyệt sau build/smoke và test có bằng chứng. `main` chỉ nhận PR phát hành từ `develop` sau các cổng nghiệm thu. Không push thẳng `main`; không tự sửa hợp đồng chung ở một module. Nếu remote chưa có `develop`, trưởng nhóm phải công bố nhánh này trước khi thành viên checkout. Xem [quy trình Git](docs/team/Git_Workflow.md) để có lệnh đầy đủ.
 
 
-Mỗi người đồng thời phụ trách một phần lý thuyết gắn với code và demo: Huy — ACID/tương tranh (ND11; sách Nguyễn Xuân Anh 2014 mục 2.5/2.5.1/2.5.3, tr. 74–77); Gia Quân — loại trừ tập trung (ND7; 2.3.3.1, tr. 56–57); Đức An — Bully (ND7; 2.3.5.1, tr. 59); Nguyên Chương — primary-backup/phục hồi (ND14/ND12; 2.8.5.2, tr. 106–107 và 2.6.6, tr. 88); Văn Khoa — RPC/định danh/khách-chủ tin cậy (ND2/ND12; 2.1.2, tr. 25–29; 2.2.1, tr. 34; 2.6.3, tr. 82–84). Số trang là trang in trong sách, đã đối chiếu bản trích xuất. Mỗi phần bảo vệ phải trình bày giả thiết, bước thuật toán, bất biến, giới hạn, trace message và demo module chính mình code. Cả năm cùng hiểu cả ba cơ chế; phần lý thuyết không tạo vai trò chỉ viết báo cáo. Xem bảng lý thuyết → code → demo và yêu cầu từng người trong [phân công](docs/team/Phan_Cong_Nhom9.md).
+Mỗi người đồng thời phụ trách lý thuyết gắn với code và demo: Huy — ACID/tương tranh (ND11; sách Nguyễn Xuân Anh 2014 mục 2.5/2.5.1/2.5.3, tr. 74–77); Gia Quân — loại trừ tập trung và primary-backup (ND7/ND14; mục 2.3.3.1, tr. 56–57 và 2.8.5.2, tr. 106–107); Đức An — Bully và phục hồi (ND7/ND12; mục 2.3.5.1, tr. 59 và 2.6.6, tr. 88); Văn Khoa — RPC/định danh/khách-chủ tin cậy (ND2/ND12; mục 2.1.2, tr. 25–29; 2.2.1, tr. 34; 2.6.3, tr. 82–84). Số trang là trang in trong sách đã đối chiếu. Mỗi phần bảo vệ trình bày giả thiết, các bước, bất biến, giới hạn, trace và demo module mình code. Cả bốn cùng hiểu coordinator, Bully và primary-backup. Xem [phân công](docs/team/Phan_Cong_Nhom9.md).
 
 ## Bàn giao và nghiệm thu
 
 [Phân công chi tiết](docs/team/Phan_Cong_Nhom9.md) nêu đầu vào/đầu ra, 6 bước mỗi người, reviewer và Definition of Done từng module. Thứ tự tích hợp là G0 hợp đồng → G1 Domain/SQL/coordinator → G2 primary+backup thật → G3 ba node → G4 recovery/client/lỗi → G5 báo cáo và demo. G1 không đủ để tuyên bố FINAL hoặc chịu lỗi.
 
-Bản Word để gửi nhóm: [Phân công nhiệm vụ nhóm 9 V12](docs/team/Phan_Cong_Nhiem_Vu_Nhom9_V12.docx). Dùng cho đợt triển khai 2 tuần, có bảng Tuần 1–Tuần 2 ở đầu tài liệu, không chia lịch ngày/giờ: phần riêng của từng người cũng tách đầu mục Tuần 1 và Tuần 2; mỗi người có 6 bước với file/API, cách tự kiểm, gói bàn giao và tình huống lỗi mẫu; cuối tài liệu có cách phối hợp, một luồng HOLD xuyên suốt và checklist PR. Xem [kết quả kiểm tra bộ khung](docs/testing/BOOTSTRAP_CHECK_2026-11-14.md) để biết chính xác những gì đã chạy và những phần còn phải triển khai.
+Bản Word phân công bốn thành viên, chia theo hai tuần và ghi rõ đầu việc, file/API, cách tự kiểm, bàn giao, reviewer và lý thuyết nằm tại [Phân công nhiệm vụ nhóm 9](docs/team/Phan_Cong_Nhiem_Vu_Nhom9_4_Thanh_Vien.docx). Bản Markdown có cùng nội dung chi tiết tại [docs/team/Phan_Cong_Nhom9.md](docs/team/Phan_Cong_Nhom9.md).
 
 Mỗi module chỉ hoàn tất khi build được, hợp đồng V12 thống nhất, có test/oracle phù hợp và được reviewer xác nhận. Từng mã [T01–T36](docs/testing/TEST_MATRIX.md) phải có [record bằng chứng](docs/testing/TEST_RECORD_TEMPLATE.md): commit SHA, dataset, cấu hình, log ba node, SQL oracle và sự khác nhau giữa LocalApplied, Stable, FINAL. Tất cả test nghiệp vụ trong ma trận bắt đầu ở trạng thái **CHƯA CHẠY**; CI smoke thành công không đổi trạng thái này.
 
@@ -139,5 +138,5 @@ Mỗi người tự hoàn thiện phần sách và code/test của mình trong c
 - Huy: [file báo cáo riêng](docs/report/01_huy_giao_tac.md).
 - Gia Quân: [file báo cáo riêng](docs/report/02_gia_quan_loai_tru.md).
 - Đức An: [file báo cáo riêng](docs/report/03_duc_an_bully.md).
-- Nguyên Chương: [file báo cáo riêng](docs/report/04_nguyen_chuong_nhan_ban.md).
+- Huy, Gia Quân và Đức An: [khung báo cáo primary-backup và phục hồi](docs/report/04_primary_backup_phuc_hoi.md).
 - Văn Khoa: [file báo cáo riêng](docs/report/05_van_khoa_truyen_thong.md).

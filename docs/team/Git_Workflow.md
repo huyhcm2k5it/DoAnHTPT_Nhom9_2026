@@ -11,8 +11,9 @@ Repo: [DoAnHTPT_Nhom9_2026](https://github.com/huyhcm2k5it/DoAnHTPT_Nhom9_2026).
 | `feature/huy-database` | Huy: SQL/Persistence và tích hợp | `develop` |
 | `feature/gia-quan-domain` | Gia Quân: Domain/Coordinator/Contracts | `develop` |
 | `feature/duc-an-election` | Đức An: Bully/Cluster.Control | `develop` |
-| `feature/nguyen-chuong-replication` | Nguyên Chương: Replication/TCP | `develop` |
 | `feature/van-khoa-client` | Văn Khoa: SDK/WinForms | `develop` |
+
+Replication/TCP work is divided by module in the current assignment: Gia Quân owns sender/Contracts, Huy owns durable receiver/SQL Apply, Đức An owns peer authorization/recovery context, and Văn Khoa owns framing/client TLS.
 
 Không push thẳng `main`; không merge feature trực tiếp vào `main`. Thay đổi Contracts, schema, authority hoặc framing phải được chủ hai bên sử dụng review trước merge.
 
@@ -68,7 +69,7 @@ git push -u origin feature/huy-database
 
 Mở PR trên GitHub với **base `develop`**, compare là nhánh feature. Thay tên nhánh, đường dẫn và commit message cho đúng công việc thực; không commit tuyên bố implementation nếu chỉ mới có scaffold. Không force-push nhánh người khác hoặc nhánh chia sẻ.
 
-PR phải ghi: vấn đề/hành vi mới; file/module và hợp đồng đổi; dependency/cổng G; lệnh kiểm tra và kết quả thực; mã T liên quan kèm record; giới hạn/chưa triển khai; reviewer. Build/smoke không thay T01–T36. Reviewer chéo: Huy ↔ Gia Quân cho Apply/domain; Đức An ↔ Nguyên Chương cho authority/replication; Văn Khoa nhờ Gia Quân và Nguyên Chương kiểm tra identity/reconnect.
+PR phải ghi: vấn đề/hành vi mới; file/module và hợp đồng đổi; dependency/cổng G; lệnh kiểm tra và kết quả thực; mã T liên quan kèm record; giới hạn/chưa triển khai; reviewer. Build/smoke không thay T01–T36. Reviewer chéo: Huy ↔ Gia Quân cho Apply/domain; Đức An ↔ Gia Quân cho authority/sender; Văn Khoa nhờ Gia Quân và Đức An kiểm tra identity, framing và xác thực.
 
 ## 5. Tích hợp và phát hành
 

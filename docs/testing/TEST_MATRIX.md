@@ -28,28 +28,28 @@ Mỗi test cần [record](TEST_RECORD_TEMPLATE.md), commit SHA, DatasetId, epoch
 | T07 | Retry đồng thời cùng RequestId | Một event/result, không thêm tác động | Gia Quân | CHƯA CHẠY / — |
 | T08 | Cùng RequestId đổi nội dung/chủ | REQUEST_CONFLICT; không ghi đè | Gia Quân | CHƯA CHẠY / — |
 | T09 | Bán đủ 10 ghế và yêu cầu dư | Tối đa 10 ticket, không bán lại SOLD | Gia Quân + Huy | CHƯA CHẠY / — |
-| T10 | Local commit rồi mất replication | Không FINAL, không đọc trạng thái local; lệnh sau không chạy | Gia Quân + Nguyên Chương | CHƯA CHẠY / — |
-| T11 | Backup Apply rồi mất ACK | Retry APPEND không Apply lần hai; đủ chứng cứ thì trả cùng result | Nguyên Chương | CHƯA CHẠY / — |
-| T12 | Chỉ chặn một ACK, backup khác ACK được | Có thể FINAL với ACK hợp lệ còn lại | Nguyên Chương | CHƯA CHẠY / — |
+| T10 | Local commit rồi mất replication | Không FINAL, không đọc trạng thái local; lệnh sau không chạy | Gia Quân + Huy | CHƯA CHẠY / — |
+| T11 | Backup Apply rồi mất ACK | Retry APPEND không Apply lần hai; đủ chứng cứ thì trả cùng result | Huy + Gia Quân | CHƯA CHẠY / — |
+| T12 | Chỉ chặn một ACK, backup khác ACK được | Có thể FINAL với ACK hợp lệ còn lại | Gia Quân | CHƯA CHẠY / — |
 | T13 | Kill primary trước local SQL commit | Không có nửa transaction; retry cùng identity | Huy | CHƯA CHẠY / — |
-| T14 | Kill primary sau local commit trước replica | Không mất FINAL trước đó; xử lý đuôi chưa FINAL đúng quy tắc | Huy + Nguyên Chương | CHƯA CHẠY / — |
-| T15 | Kill primary sau backup Apply trước ACK | Survivor có event phải được giữ/nhân bản trước READY | Nguyên Chương + Đức An | CHƯA CHẠY / — |
+| T14 | Kill primary sau local commit trước replica | Không mất FINAL trước đó; xử lý đuôi chưa FINAL đúng quy tắc | Huy + Gia Quân | CHƯA CHẠY / — |
+| T15 | Kill primary sau backup Apply trước ACK | Survivor có event phải được giữ/nhân bản trước READY | Huy + Đức An | CHƯA CHẠY / — |
 | T16 | Kill primary sau ACK trước response | GET_RESULT sau phục hồi trả đúng result | Huy + Văn Khoa | CHƯA CHẠY / — |
 | T17 | Mất response FINAL và kill/restart client | Pending resolve cùng TicketId/ReservationId | Văn Khoa | CHƯA CHẠY / — |
 | T18 | Candidate stale, survivor khác mới hơn | Candidate lấy lịch sử từ survivor, không chọn DB theo ID | Đức An + Huy | CHƯA CHẠY / — |
 | T19 | SQL exception sau commit nhưng client thư viện báo lỗi | Dừng gate; tra RequestId, không tạo event thứ hai | Huy | CHƯA CHẠY / — |
-| T20 | Backup crash và rejoin | Freeze, replay, hash/digest cùng K; NodeId không bị copy | Nguyên Chương + Đức An | CHƯA CHẠY / — |
-| T21 | Node cũ có đuôi khác ở LogIndex được dùng lại | Archive/repair; epoch/event/hash cũ bị từ chối | Nguyên Chương + Đức An | CHƯA CHẠY / — |
+| T20 | Backup crash và rejoin | Freeze, replay, hash/digest cùng K; NodeId không bị copy | Huy + Đức An | CHƯA CHẠY / — |
+| T21 | Node cũ có đuôi khác ở LogIndex được dùng lại | Archive/repair; epoch/event/hash cũ bị từ chối | Huy + Đức An | CHƯA CHẠY / — |
 | T22 | Mất heartbeat, old primary vẫn chạy | Không promote khi chưa fence | Đức An | CHƯA CHẠY / — |
-| T23 | Partition với primary ở mỗi phía | Hành vi đúng hai dòng ma trận lỗi; không hai writer | Đức An + Nguyên Chương | CHƯA CHẠY / — |
+| T23 | Partition với primary ở mỗi phía | Hành vi đúng hai dòng ma trận lỗi; không hai writer | Đức An + Gia Quân | CHƯA CHẠY / — |
 | T24 | Hai node đồng thời bầu, mất ANSWER/COORDINATOR | Tái bầu, hội tụ khi hai node liên lạc ổn định; chưa tự mở gate | Đức An | CHƯA CHẠY / — |
 | T25 | Crash trong ghi manifest ở participant thứ nhất | Cả hai đóng quyền; tiếp tục cùng RunId rồi mới mở | Đức An + Huy | CHƯA CHẠY / — |
 | T26 | Chỉ còn một participant hợp lệ | Không mở quyền/FINAL ghi mới | Đức An | CHƯA CHẠY / — |
-| T27 | ACK cũ/sai event/sai hash | Không tăng StableIndex | Nguyên Chương | CHƯA CHẠY / — |
-| T28 | GAP, duplicate và prefix conflict | Replay đúng mốc; duplicate ACK; conflict đóng gate | Nguyên Chương + Huy | CHƯA CHẠY / — |
+| T27 | ACK cũ/sai event/sai hash | Không tăng StableIndex | Gia Quân | CHƯA CHẠY / — |
+| T28 | GAP, duplicate và prefix conflict | Replay đúng mốc; duplicate ACK; conflict đóng gate | Huy + Đức An | CHƯA CHẠY / — |
 | T29 | GET_SEATS xen giữa LocalApplied và Stable | Không trả snapshot chưa công bố hoặc mốc sai | Gia Quân | CHƯA CHẠY / — |
-| T30 | Đối soát K khi đang có yêu cầu mới | Freeze trước; dữ liệu và result cùng K | Nguyên Chương + Huy | CHƯA CHẠY / — |
-| T31 | Frame chia/gộp, EOF, size ngoài giới hạn | Không lệch JSON/frame, đóng kết nối đúng, không sửa nghiệp vụ | Nguyên Chương | CHƯA CHẠY / — |
+| T30 | Đối soát K khi đang có yêu cầu mới | Freeze trước; dữ liệu và result cùng K | Huy + Đức An | CHƯA CHẠY / — |
+| T31 | Frame chia/gộp, EOF, size ngoài giới hạn | Không lệch JSON/frame, đóng kết nối đúng, không sửa nghiệp vụ | Văn Khoa | CHƯA CHẠY / — |
 | T32 | Queue đầy/socket mất sau bắt đầu operation | RETRY_LATER trước nhận; operation đã bắt đầu không bị bỏ | Văn Khoa + Gia Quân | CHƯA CHẠY / — |
 | T33 | Giả peer/owner/leader hint | Không vượt xác thực hoặc đổi quyền ghi | Đức An + Văn Khoa | CHƯA CHẠY / — |
 | T34 | Pending dataset cũ hoặc hai client dùng cùng store | Từ chối dataset, khóa store; không replay chéo | Văn Khoa | CHƯA CHẠY / — |

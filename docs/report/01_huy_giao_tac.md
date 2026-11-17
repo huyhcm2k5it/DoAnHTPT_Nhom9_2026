@@ -10,7 +10,7 @@ Consistency: FK/UNIQUE/CHECK trong migration cùng ValidateDecision kiểm tra q
 
 Isolation: SERIALIZABLE và khóa UPDLOCK/HOLDLOCK trên NodeState sắp thứ tự các truy cập local. Không dùng NOLOCK. Đây là hàng rào local; coordinator của Gia Quân còn phải sắp thứ tự toàn bộ thao tác và giữ grant tới Stable hoặc đóng cụm.
 
-Durability: SqlClient chỉ trả Apply sau commit; từ chối chế độ forced delayed durability. datetime2(7) được bind rõ để event và dữ liệu SQL giữ nguyên độ chính xác UTC. SQL commit local chưa đủ FINAL: Nguyên Chương phải có ACK sau backup durable, coordinator mới công bố.
+Durability: SqlClient chỉ trả Apply sau commit; từ chối chế độ forced delayed durability. datetime2(7) được bind rõ để event và dữ liệu SQL giữ nguyên độ chính xác UTC. SQL commit local chưa đủ FINAL: Gia Quân kiểm receipt ACK sau khi backup commit bền vững rồi coordinator mới công bố.
 
 ## Trace thực hiện
 

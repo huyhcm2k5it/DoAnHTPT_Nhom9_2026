@@ -25,6 +25,6 @@ foreach ($id in 1..3) {
 }
 ```
 
-UI đã được build; kiểm tra `--check` chỉ xác minh cấu hình rồi thoát, không xác nhận thao tác giao diện. Chưa có SQL Apply, TCP/TLS listener, login, booking, Bully, replication, fencing/promotion hoặc pending store thật. Những phần đó phải được năm thành viên triển khai và nghiệm thu theo [V12](../De6_Thiet_Ke_Trien_Khai_V12.md) cùng [ma trận kiểm thử](TEST_MATRIX.md).
+UI đã được build; kiểm tra `--check` chỉ xác minh cấu hình rồi thoát, không xác nhận thao tác giao diện. Chưa có SQL Apply, TCP/TLS listener, login, booking, Bully, replication, fencing/promotion hoặc pending store thật. Những phần đó phải được bốn thành viên hiện tại triển khai và nghiệm thu theo [V12](../De6_Thiet_Ke_Trien_Khai_V12.md) cùng [ma trận kiểm thử](TEST_MATRIX.md).
 
 GitHub Actions đã được cấu hình trong `.github/workflows/build.yml`. Kết quả chạy CI trên GitHub cần xem tại trang Actions; không suy từ kết quả local thành CI từ xa đã đạt.

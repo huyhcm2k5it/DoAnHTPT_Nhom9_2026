@@ -1,6 +1,6 @@
 # De6.Cluster.Replication
 
-Owner: Nguyên Chương.
+Gia Quân phụ trách sender và đối chiếu receipt. Huy phụ trách receiver gọi SQL Apply. Đức An cung cấp peer authorization và RecoveryContext.
 
 Implement immutable event delivery, exact receipt matching, duplicate/GAP/conflict handling and catch-up. FINAL requires primary plus one backup durable storage. IReplicaSender has no implementation. V12 sections 10, 11, 14; T10-T12, T15-T16, T20-T21, T27-T30.
 
@@ -10,6 +10,6 @@ Definition of done for future implementation: reviewed shared contracts, tests f
 
 ## Hướng dẫn bắt đầu
 
-Nguyên Chương thực hiện theo các bước **C1–C6** trong [phân công chi tiết](../../docs/team/Phan_Cong_Nhom9.md#5-nguyên-chương--replication-và-transporttcp). Mỗi bước nêu file/API cần cài, cách tự kiểm và phần giao cho bạn khác. Các tên file bổ sung trong hướng dẫn là file cần tạo, không phải implementation đã có.
+Các phần sender, receiver, replay và fault test được giao theo module trong [phân công chi tiết](../../docs/team/Phan_Cong_Nhom9.md). Các tên file dự kiến trong hướng dẫn chưa đồng nghĩa implementation đã có.
 
-Đọc thêm mục 9–12 của tài liệu đó để ghép fixture, chạy luồng HOLD xuyên suốt, chuẩn bị PR và hiểu các trạng thái LocalApplied/Stable/FINAL. Cả năm người đều code, test và hoàn thiện phần lý thuyết riêng.
+Đọc phần cổng ghép và luồng HOLD trong tài liệu đó để dùng cùng fixture và phân biệt LocalApplied/Stable/FINAL. Cả bốn thành viên đều code, test và hoàn thiện phần lý thuyết gắn với code.

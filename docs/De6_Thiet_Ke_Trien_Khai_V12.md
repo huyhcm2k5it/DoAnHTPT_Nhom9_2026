@@ -2,7 +2,7 @@
 
 Phiên bản V12 ngày 14 tháng 11 năm 2026
 
-Đề 6 học phần Các hệ thống phân tán PTIT cơ sở TP.HCM. Căn cứ đề bài ưu tiên là bản HTPT 26-27 theo lựa chọn của người học. Trọng tâm kiến thức là các bài giảng ThS. Lê Ngọc Bảo. Năm thành viên, năm máy, ba server lưu ba bản sao SQL độc lập và ba tiến trình quầy trên hai máy còn lại.
+Đề 6 học phần Các hệ thống phân tán PTIT cơ sở TP.HCM. Căn cứ đề bài ưu tiên là bản HTPT 26-27 theo lựa chọn của người học. Trọng tâm kiến thức là các bài giảng ThS. Lê Ngọc Bảo. Nhóm hiện có bốn thành viên làm việc trên năm máy: ba server lưu ba bản sao SQL độc lập và ba tiến trình quầy trên hai máy còn lại.
 
 **Quyết định kiến trúc:** điều phối tập trung các thao tác nghiệp vụ, bầu ứng viên bằng Bully và nhân bản primary-backup đồng bộ. Một kết quả chỉ được trả FINAL sau khi cùng sự kiện và kết quả đã được lưu bền vững ở primary cùng ít nhất một backup. Chuyển quyền có kiểm soát sau khi cách ly writer cũ và đối soát hai bản sao. Không tự promote chỉ vì timeout.
 

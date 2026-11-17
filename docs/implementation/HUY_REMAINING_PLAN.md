@@ -47,7 +47,7 @@ Trạng thái cập nhật ngày 16 tháng 11 năm 2026. Người dùng đã ti�
 
 - [x] Kiểm tra diff/file chưa track và `git diff --check`; `.tools`, `bin/obj`, DB, key và secret không nằm trong thay đổi dự kiến.
 - [x] Commit tuần 2 `f0ba4f0` trên `feature/huy-database` và push thành công lên `origin/feature/huy-database`.
-- [ ] Mở PR về `develop` và yêu cầu Gia Quân/Đức An/Nguyên Chương review hợp đồng dùng chung. Không có GitHub CLI/connector trong phiên; giao diện máy tính không khởi tạo được. Link tạo PR đã sẵn: https://github.com/huyhcm2k5it/DoAnHTPT_Nhom9_2026/pull/new/feature/huy-database. Không tự merge; chờ review/CI nhóm.
+- [ ] Yêu cầu Gia Quân review Contracts/sender, Đức An review peer/recovery và Văn Khoa review frame/TLS khi tích hợp. Không tự xác nhận thay reviewer module khác.
 
 ## Phần cần phối hợp sau khi Huy bàn giao
 
@@ -55,7 +55,7 @@ Trạng thái cập nhật ngày 16 tháng 11 năm 2026. Người dùng đã ti�
 | --- | --- |
 | Gia Quân | Decision engine và coordinator thật; grant, dedup và công bố Stable/FINAL |
 | Đức An | Gate/maintenance/recovery context thật, fencing/manifest và activation |
-| Nguyên Chương | TCP/TLS, append/replay nguyên bytes và ACK sau durable commit |
+| Đức An + Văn Khoa | Xác thực peer, TCP/TLS và replay bằng RecoveryContext; Huy giữ Apply/receipt sau commit |
 | Văn Khoa | SDK/pending/reconnect và UI dùng kết quả có thẩm quyền |
 | Cả nhóm | G0–G5, ba server/SQL độc lập, test T01–T36 với record/oracle thật |
 

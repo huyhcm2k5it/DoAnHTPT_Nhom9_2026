@@ -12,4 +12,4 @@ Definition of done for future implementation: reviewed shared contracts, tests f
 
 Văn Khoa thực hiện theo các bước **K1–K6** trong [phân công chi tiết](../../docs/team/Phan_Cong_Nhom9.md#6-văn-khoa--clientsdk-và-winforms). Mỗi bước nêu file/API cần cài, cách tự kiểm và phần giao cho bạn khác. Các tên file bổ sung trong hướng dẫn là file cần tạo, không phải implementation đã có.
 
-Đọc thêm mục 9–12 của tài liệu đó để ghép fixture, chạy luồng HOLD xuyên suốt, chuẩn bị PR và hiểu các trạng thái LocalApplied/Stable/FINAL. Cả năm người đều code, test và hoàn thiện phần lý thuyết riêng.
+Đọc phần cổng ghép và luồng HOLD trong tài liệu đó để phối hợp fixture và hiểu các trạng thái LocalApplied/Stable/FINAL. Cả bốn người đều code, test và hoàn thiện phần lý thuyết riêng.
