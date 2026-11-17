@@ -8,6 +8,12 @@ Theo [bản phân công nhóm](../team/Phan_Cong_Nhom9.md), phần Huy gồm SQL
 - Phần Huy đã có `IStoreAccessGate`, `SqlBookingStore`, `AppendAndApplyAsync`, `ApplyReplayEntryAsync`, `AuditLocalAsync`, `GetFrozenPrefixAsync` và `RebuildProjectionAsync`. Cần nối gate thật, đọc log theo mốc và lưu/đọc lại manifest. `RebuildProjectionAsync` dựng projection từ log cục bộ hiện có, nên sửa một log có đuôi xung đột cần đường repair riêng có archive.
 - Coordinator của Gia Quân đã có `IAuthorityGate`. `De6.Booking.Domain.IBookingStore` và `De6.Contracts.IBookingStore` là hai interface khác nhau. Chốt cách ghép coordinator với SQL và đường công bố `StableIndex` ở Host cùng Gia Quân trước khi nối gate vào luồng thật. Nhánh này bám [thiết kế V12](../De6_Thiet_Ke_Trien_Khai_V12.md), mục 5, 6, 10–17 và 20.
 
+## Tình trạng tuần 1 trên nhánh hiện tại
+
+Đã có phần lõi A1–A3: Control boot fail-closed; Bully tách ứng viên khỏi quyền phục vụ, xử lý notice/timeout/backoff; heartbeat dùng thời gian đơn điệu; cổng lưu trữ giới hạn primary/backup/snapshot/replay/maintenance; certificate pin ánh xạ peer sang NodeId. Các nhánh này có harness riêng trong `tests/unit/De6.Cluster.Control.Tests`.
+
+Đây **chưa phải cụm chạy đầu-cuối** và chưa đánh dấu nghiệm thu G2–G4. Host chưa có listener TLS/TCP và bộ lập lịch gọi election timeout; heartbeat/membership chưa được nối vào callback eligibility; coordinator/domain và SQL Persistence vẫn có hai hợp đồng `IBookingStore` khác nhau, nên chưa có composition chạy thật cùng gate; activation/fence/manifest thuộc tuần 2. Build/harness xanh chỉ xác nhận lõi biệt lập, chưa chứng minh bán vé hoặc chuyển primary đúng trên máy thật.
+
 ## Tuần 1 — Kiểm soát quyền và bầu ứng viên
 
 | Việc | Nơi làm chính | Đầu ra để bàn giao |

@@ -2,11 +2,11 @@
 
 Owner: Đức An (phối hợp Huy về store/replay và Văn Khoa về kết nối peer).
 
-Own serving gates and coordinated recovery/activation. Only immutable BootstrapState exists: RECOVERING, ServingEnabled=false, StableIndex=0 every boot. No activation, promotion, manifest, fencing, SQL or recovery is implemented. Future ClusterControl must synchronize grants and administrative transitions. V12 sections 5, 12-14, 16-17.
+`ClusterControl` implements both the Domain `IAuthorityGate` and SQL `IStoreAccessGate` contracts so Host can supply one shared instance when it composes the booking service. It starts every process in `RECOVERING` with `StableIndex=0`, restricts mutation, append, snapshot, replay and maintenance leases by role/epoch/index, and closes admission before maintenance. Election results are recorded separately from serving authority. Verified activation remains internal to this assembly for the recovery coordinator work in week two. The current Host only prints the closed boot state because it does not yet compose a booking service. V12 sections 5, 12-14, 16-17.
 
 Specification: [V12](../../docs/De6_Thiet_Ke_Trien_Khai_V12.md). Team handoff and commands: [repository README](../../README.md).
 
-Definition of done for future implementation: reviewed shared contracts, tests for owned V12 cases, error/uncertainty paths, and reproducible evidence. A successful template build does not satisfy business acceptance.
+Week-one code is covered by `tests/unit/De6.Cluster.Control.Tests`. Activation, distributed manifest, physical fencing and Host/SQL service composition remain for later integration. Passing the isolated tests does not satisfy cluster acceptance.
 
 ## Hướng dẫn bắt đầu
 

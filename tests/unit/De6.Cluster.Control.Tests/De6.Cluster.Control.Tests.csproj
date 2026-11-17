@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../../src/De6.Cluster.Control/De6.Cluster.Control.csproj" />
+    <ProjectReference Include="../../../src/De6.Cluster.Election/De6.Cluster.Election.csproj" />
+    <ProjectReference Include="../../../src/De6.Contracts/De6.Contracts.csproj" />
+  </ItemGroup>
+</Project>

@@ -15,9 +15,10 @@ catch (Exception exception) when (exception is InvalidDataException or IOExcepti
     Console.Error.WriteLine($"Configuration error: {exception.Message}");
     return 2;
 }
-var state = new BootstrapState();
-Console.WriteLine($"S{options.NodeId} DatasetId={options.DatasetId:D} Role={state.Role} ServingEnabled={state.ServingEnabled.ToString().ToLowerInvariant()}");
-Console.WriteLine("No booking service is listening. No FINAL responses can be produced. Activation/coordinator/TLS/TCP/election/replication remain unimplemented.");
+var control = new ClusterControl(options.NodeId, options.DatasetId);
+var state = control.Snapshot;
+Console.WriteLine($"S{options.NodeId} DatasetId={options.DatasetId:D} Role={state.Role.ToString().ToUpperInvariant()} ServingEnabled={state.ServingEnabled.ToString().ToLowerInvariant()} StableIndex={state.StableIndex}");
+Console.WriteLine("No booking service is listening. No FINAL responses can be produced. Activation, network listeners, peer TLS and host election wiring are still pending.");
 if (args.Contains("--check"))
 {
     Console.WriteLine("Configuration validated only; no SQL access was attempted.");
