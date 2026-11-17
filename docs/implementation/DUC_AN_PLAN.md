@@ -1,6 +1,6 @@
 # Kế hoạch hai tuần cho phần Đức An
 
-Huy đảm nhiệm cả phần SQL/Persistence của Huy và phần Bully, Control, xác thực peer và điều phối phục hồi của Đức An. Phần Đức An làm trên `feature/duc-an-election`, tách theo phạm vi PR để nhóm dễ review. Hai tuần dưới đây là thứ tự triển khai và bàn giao.
+Theo [bản phân công nhóm](../team/Phan_Cong_Nhom9.md), phần Huy gồm SQL/Persistence (H1–H6). Phần Đức An gồm Bully, Control, xác thực peer và điều phối phục hồi (A1–A6). Huy thực hiện thay phần Đức An trên `feature/duc-an-election`. Kế hoạch hai tuần dưới đây dành cho A1–A6.
 
 ## Điểm xuất phát trên develop
 
@@ -63,9 +63,9 @@ Cuối tuần 1 bàn giao bảng chuyển trạng thái, trace Bully và chữ k
 2. Khi node cũ quay lại, giữ `RECOVERING`. Freeze primary ở mốc `K=StableIndex=LastAppliedIndex` sau khi giải quyết thao tác đang chờ. Nếu đúng tiền tố thì gửi phần còn thiếu. Nếu có đuôi khác thì yêu cầu `RepairPlan` do admin xác nhận, archive trước khi dựng lại từ seed và log hiện hành, kiểm lại NodeId riêng. So hash/digest tại K, lưu quyền đã chấp nhận rồi admit node về `BACKUP_READY`. Primary phải còn ít nhất một backup hợp lệ trước khi mở lại.
 3. Chạy G3 với ba server và ba database SQL độc lập khi sender/receiver và transport đã nối. Chạy phần liên quan ở G4 với Gia Quân và Văn Khoa. Lưu SHA, dataset, node/epoch, `RunId`, mốc K, hash/digest, lỗi đã chèn và kết quả thực theo [mẫu record](../testing/TEST_RECORD_TEMPLATE.md). Theo [ma trận nghiệm thu](../testing/TEST_MATRIX.md), đặc biệt T18, T20–T26, T28, T30 và T33.
 
-## Bàn giao khi một người giữ hai phần
+## Phối hợp giữa các phần
 
-| Ranh giới | Huy cần bàn giao ở hai vai | Người review cùng |
+| Ranh giới | Nội dung cần bàn giao | Người review cùng |
 | --- | --- | --- |
 | Control ↔ SQL | Lease/gate, kiểm chứng mốc log, manifest transaction, replay và repair. Tách commit quyền phục vụ khỏi commit SQL để review hợp đồng trước. | Gia Quân review grant/Stable và điều kiện mở quyền. |
 | Control ↔ coordinator/sender | Freeze, quyền theo epoch/leader, `StableIndex` và điều kiện dùng receipt. | Gia Quân |
