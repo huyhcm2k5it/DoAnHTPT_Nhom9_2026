@@ -16,6 +16,7 @@ public interface IBookingStore : IRequestResultLookup
     ValueTask<IReadOnlyList<SeatView>> GetAllSeatsAsync(CancellationToken cancellationToken = default);
     ValueTask<ReservationRecord?> GetReservationAsync(Guid reservationId, CancellationToken cancellationToken = default);
     ValueTask<TicketRecord?> GetTicketByReservationAsync(Guid reservationId, CancellationToken cancellationToken = default);
+    ValueTask<IReadOnlyList<ReservationRecord>> GetReservationsByOwnerAsync(string ownerId, CancellationToken cancellationToken = default);
 
     Task<PersistedEvent> ApplyLocalAsync(
         AuthenticatedCommand command,
@@ -34,4 +35,5 @@ public interface ICommandCoordinator : IAsyncDisposable
     Task<CommandReply> SubmitAsync(AuthenticatedCommand command, CancellationToken replyCancellation);
     Task<StableSnapshot> GetSeatsAsync(CancellationToken cancellationToken = default);
     Task<CommandReply> GetResultAsync(Guid requestId, string ownerId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<ReservationRecord>> GetMyReservationsAsync(string authenticatedOwnerId, CancellationToken cancellationToken = default);
 }

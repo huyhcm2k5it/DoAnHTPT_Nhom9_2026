@@ -37,6 +37,16 @@ public static class Fixtures
         var identity = new CommandIdentity(datasetId, requestId, ownerId, hash, cmd);
         return new AuthenticatedCommand(identity);
     }
+
+    public static PersistedEvent CreateSamplePersistedEvent(long logIndex, long epoch = 1, int writerId = 1)
+    {
+        var eventId = Guid.NewGuid();
+        var prevHash = Convert.FromHexString(ExpectedSeedHash);
+        var payloadBytes = Encoding.UTF8.GetBytes($"{{\"logIndex\":{logIndex},\"eventId\":\"{eventId:N}\"}}");
+        var eventHash = CanonicalProtocol.ComputeEventHashBytes(prevHash, payloadBytes);
+        var resultBytes = Encoding.UTF8.GetBytes("{\"code\":\"OK_HELD\"}");
+        return new PersistedEvent(SampleDatasetId, logIndex, epoch, writerId, eventId, payloadBytes, eventHash, resultBytes);
+    }
 }
 
 public sealed class FakeAuthorityGate : IAuthorityGate
@@ -86,6 +96,16 @@ public sealed class FakeBookingStore : De6.Booking.Domain.IBookingStore
     {
         var ticket = Tickets.Values.FirstOrDefault(t => t.ReservationId == reservationId);
         return ValueTask.FromResult(ticket);
+    }
+
+    public Func<Task>? BeforeGetReservationsAsync { get; set; }
+
+    public async ValueTask<IReadOnlyList<ReservationRecord>> GetReservationsByOwnerAsync(string ownerId, CancellationToken cancellationToken = default)
+    {
+        if (BeforeGetReservationsAsync is not null)
+            await BeforeGetReservationsAsync();
+        var list = Reservations.Values.Where(r => r.OwnerId == ownerId).OrderBy(r => r.ReservationId).ToList() as IReadOnlyList<ReservationRecord>;
+        return list;
     }
 
     public async ValueTask<ExistingRequestRecord?> FindByRequestIdAsync(Guid requestId, CancellationToken cancellationToken = default)
@@ -203,5 +223,40 @@ public sealed class FakeReplicationPipeline : IReplicaSender
 
         return new ReplicationOutcome(ReceiptFactory?.Invoke(persistedEvent) ?? new AppliedReceipt(AckNodeId, persistedEvent.Epoch, persistedEvent.Epoch,
             persistedEvent.LogIndex, persistedEvent.EventId, persistedEvent.EventHash, null));
+    }
+}
+
+public sealed class FakePeerChannel : IPeerChannel
+{
+    public int TargetNodeId { get; set; }
+    public bool ShouldSucceed { get; set; } = true;
+    public TimeSpan Delay { get; set; } = TimeSpan.Zero;
+    public Func<PersistedEvent, AppliedReceipt?>? CustomReceiptFactory { get; set; }
+
+    public FakePeerChannel(int targetNodeId)
+    {
+        TargetNodeId = targetNodeId;
+    }
+
+    public async Task<AppliedReceipt?> SendAppendApplyAsync(PersistedEvent persistedEvent, TimeSpan timeout, CancellationToken cancellationToken)
+    {
+        if (Delay > TimeSpan.Zero)
+        {
+            await Task.Delay(Delay, cancellationToken).ConfigureAwait(false);
+        }
+
+        if (!ShouldSucceed) return null;
+
+        if (CustomReceiptFactory is not null)
+            return CustomReceiptFactory(persistedEvent);
+
+        return new AppliedReceipt(
+            TargetNodeId,
+            persistedEvent.Epoch,
+            persistedEvent.Epoch,
+            persistedEvent.LogIndex,
+            persistedEvent.EventId,
+            persistedEvent.EventHash,
+            RecoveryRunId: null);
     }
 }
