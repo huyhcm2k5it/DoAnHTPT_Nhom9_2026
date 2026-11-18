@@ -140,3 +140,7 @@ Mỗi người tự hoàn thiện phần sách và code/test của mình trong c
 - Đức An: [file báo cáo riêng](docs/report/03_duc_an_bully.md).
 - Huy, Gia Quân và Đức An: [khung báo cáo primary-backup và phục hồi](docs/report/04_primary_backup_phuc_hoi.md).
 - Văn Khoa: [file báo cáo riêng](docs/report/05_van_khoa_truyen_thong.md).
+
+## Đặc tả và lập kế hoạch bằng Spec Kit
+
+Repo có tích hợp Spec Kit 1.4.2 cho Codex. Mỗi thành viên muốn dùng lệnh Spec Kit cần cài CLI trên máy cá nhân; thư mục `.specify/` và skill `.agents/skills/speckit-*` được lưu trong repo để cả nhóm dùng chung. Spec Kit hỗ trợ viết yêu cầu, kế hoạch và task; không thay thế V12, CLO chính thức của lớp, code review hoặc kiểm thử. Xem [hướng dẫn cài và quy trình nhóm](docs/team/SPEC_KIT.md).
