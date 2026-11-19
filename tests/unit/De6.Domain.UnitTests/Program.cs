@@ -1,4 +1,5 @@
 using De6.Booking.Domain;
+using De6.Cluster.Replication;
 using De6.Contracts;
 
 namespace De6.Domain.UnitTests;
@@ -644,6 +645,246 @@ internal static partial class Program
         });
 
         await RunWeekOneHandoffTestsAsync();
+
+        // --- Week Two (Q5 & Q6) Tests ---
+        foreach (var field in new[] { "dataset", "epoch", "index" })
+        {
+            await RunTestAsync($"Q6: rejects reservation snapshot with wrong {field}", async () =>
+            {
+                var store = new FakeBookingStore
+                {
+                    TransformReservationsSnapshot = s => field switch
+                    {
+                        "dataset" => s with { DatasetId = Guid.NewGuid() },
+                        "epoch" => s with { Epoch = s.Epoch + 1 },
+                        _ => s with { AppliedIndex = s.AppliedIndex + 1 }
+                    }
+                };
+                await using var coordinator = new CommandCoordinator(Fixtures.SampleDatasetId, new FakeAuthorityGate(), store, new FakeReplicationPipeline());
+                var rejected = false;
+                try { await coordinator.GetMyReservationsAsync("A"); }
+                catch (InvalidOperationException) { rejected = true; }
+                AssertTrue(rejected);
+            });
+        }
+        await RunTestAsync("Q5: stale authority receipt cannot mask a valid backup ACK", async () =>
+        {
+            var stale = new FakePeerChannel(2)
+            {
+                CustomReceiptFactory = e => new AppliedReceipt(2, e.Epoch + 1, e.Epoch, e.LogIndex, e.EventId, e.EventHash, null)
+            };
+            var valid = new FakePeerChannel(3) { Delay = TimeSpan.FromMilliseconds(20) };
+            var sender = new SynchronousReplicaSender([stale, valid], localNodeId: 1);
+            var outcome = await sender.EnsureOneBackupAsync(Fixtures.CreateSamplePersistedEvent(1), TimeSpan.FromSeconds(1), CancellationToken.None);
+            AssertNotNull(outcome.MatchingReceipt);
+            AssertEqual(3, outcome.MatchingReceipt!.NodeId);
+        });
+        await RunTestAsync("Q5: SynchronousReplicaSender reaches Quorum (2/3) when 1 backup ACKs", async () =>
+        {
+            var peer2 = new FakePeerChannel(2) { ShouldSucceed = true };
+            var peer3 = new FakePeerChannel(3) { ShouldSucceed = false }; // peer 3 down
+            var sender = new SynchronousReplicaSender([peer2, peer3], localNodeId: 1);
+
+            var eventData = Fixtures.CreateSamplePersistedEvent(1);
+            var outcome = await sender.EnsureOneBackupAsync(eventData, TimeSpan.FromSeconds(2), CancellationToken.None);
+
+            AssertNotNull(outcome.MatchingReceipt);
+            AssertEqual(2, outcome.MatchingReceipt!.NodeId);
+            AssertEqual(eventData.LogIndex, outcome.MatchingReceipt.LogIndex);
+            AssertTrue(!outcome.IsUncertain);
+        });
+
+        await RunTestAsync("Q5: SynchronousReplicaSender fails Quorum when all backups fail or timeout", async () =>
+        {
+            var peer2 = new FakePeerChannel(2) { ShouldSucceed = false };
+            var peer3 = new FakePeerChannel(3) { ShouldSucceed = false };
+            var sender = new SynchronousReplicaSender([peer2, peer3], localNodeId: 1);
+
+            var eventData = Fixtures.CreateSamplePersistedEvent(2);
+            var outcome = await sender.EnsureOneBackupAsync(eventData, TimeSpan.FromMilliseconds(200), CancellationToken.None);
+
+            AssertNull(outcome.MatchingReceipt);
+            AssertTrue(outcome.IsUncertain);
+        });
+
+        await RunTestAsync("Q5: SynchronousReplicaSender rejects corrupted receipt (wrong hash or epoch)", async () =>
+        {
+            var peer2 = new FakePeerChannel(2)
+            {
+                CustomReceiptFactory = e => new AppliedReceipt(2, e.Epoch, e.Epoch + 99, e.LogIndex, e.EventId, e.EventHash, null) // corrupted epoch
+            };
+            var sender = new SynchronousReplicaSender([peer2], localNodeId: 1);
+
+            var eventData = Fixtures.CreateSamplePersistedEvent(3);
+            var outcome = await sender.EnsureOneBackupAsync(eventData, TimeSpan.FromSeconds(1), CancellationToken.None);
+
+            AssertNull(outcome.MatchingReceipt);
+            AssertTrue(outcome.IsUncertain);
+        });
+
+        await RunTestAsync("Q5: SynchronousReplicaSender rejects receipt with mismatched peer NodeId", async () =>
+        {
+            // Peer channel is configured for target node 2, but returns receipt claiming node 3
+            var peer2 = new FakePeerChannel(2)
+            {
+                CustomReceiptFactory = e => new AppliedReceipt(3, e.Epoch, e.Epoch, e.LogIndex, e.EventId, e.EventHash, null)
+            };
+            var sender = new SynchronousReplicaSender([peer2], localNodeId: 1);
+
+            var eventData = Fixtures.CreateSamplePersistedEvent(4);
+            var outcome = await sender.EnsureOneBackupAsync(eventData, TimeSpan.FromSeconds(1), CancellationToken.None);
+
+            AssertNull(outcome.MatchingReceipt);
+            AssertTrue(outcome.IsUncertain);
+        });
+
+        await RunTestAsync("Q6: GetMyReservationsAsync returns only reservations of authenticated owner", async () =>
+        {
+            var store = new FakeBookingStore();
+            var gate = new FakeAuthorityGate();
+            await using var coordinator = new CommandCoordinator(Fixtures.SampleDatasetId, gate, store, new FakeReplicationPipeline());
+
+            // Hold seat 1 for Quầy A
+            var cmdA = Fixtures.CreateHoldCommand(Fixtures.SampleDatasetId, Guid.NewGuid(), "A", 1);
+            var replyA = await coordinator.SubmitAsync(cmdA, CancellationToken.None);
+            AssertEqual(TransportStatus.Final, replyA.Status);
+
+            // Hold seat 2 for Quầy B
+            var cmdB = Fixtures.CreateHoldCommand(Fixtures.SampleDatasetId, Guid.NewGuid(), "B", 2);
+            var replyB = await coordinator.SubmitAsync(cmdB, CancellationToken.None);
+            AssertEqual(TransportStatus.Final, replyB.Status);
+
+            // Query by Quầy A
+            var resA = await coordinator.GetMyReservationsAsync("A");
+            AssertEqual(Fixtures.SampleDatasetId, resA.DatasetId);
+            AssertEqual(gate.CurrentEpoch, resA.Epoch);
+            AssertEqual(store.GetStableIndex(), resA.AppliedIndex);
+            AssertEqual(1, resA.Reservations.Count);
+            AssertEqual("A", resA.Reservations[0].OwnerId);
+            AssertEqual(1, resA.Reservations[0].SeatNo);
+
+            // Query by Quầy B
+            var resB = await coordinator.GetMyReservationsAsync("B");
+            AssertEqual(1, resB.Reservations.Count);
+            AssertEqual("B", resB.Reservations[0].OwnerId);
+            AssertEqual(2, resB.Reservations[0].SeatNo);
+
+            // Query by Quầy C (no reservations)
+            var resC = await coordinator.GetMyReservationsAsync("C");
+            AssertEqual(0, resC.Reservations.Count);
+        });
+
+        await RunTestAsync("Q6: GetMyReservationsAsync blocks during in-flight mutation until Stable", async () =>
+        {
+            var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var replication = new FakeReplicationPipeline { BeforeReceiptAsync = _ => { entered.TrySetResult(); return release.Task; } };
+            var store = new FakeBookingStore();
+            var gate = new FakeAuthorityGate();
+            await using var coordinator = new CommandCoordinator(Fixtures.SampleDatasetId, gate, store, replication);
+
+            var cmdA = Fixtures.CreateHoldCommand(Fixtures.SampleDatasetId, Guid.NewGuid(), "A", 6);
+            var pendingMutation = coordinator.SubmitAsync(cmdA, CancellationToken.None);
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(2));
+
+            // While mutation is in flight, GetMyReservationsAsync must wait for lock
+            var readTask = coordinator.GetMyReservationsAsync("A");
+            AssertTrue(!readTask.IsCompleted);
+
+            // Release mutation replication
+            release.SetResult();
+            await pendingMutation;
+            var resList = await readTask;
+
+            AssertEqual(1, resList.Reservations.Count);
+            AssertEqual(6, resList.Reservations[0].SeatNo);
+        });
+
+        await RunTestAsync("Q6: GetMyReservationsAsync throws InvalidOperationException if epoch changes after store read", async () =>
+        {
+            var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var store = new FakeBookingStore();
+            var gate = new FakeAuthorityGate();
+            await using var coordinator = new CommandCoordinator(Fixtures.SampleDatasetId, gate, store, new FakeReplicationPipeline());
+
+            var cmdA = Fixtures.CreateHoldCommand(Fixtures.SampleDatasetId, Guid.NewGuid(), "A", 1);
+            AssertEqual(TransportStatus.Final, (await coordinator.SubmitAsync(cmdA, CancellationToken.None)).Status);
+
+            store.BeforeGetReservationsAsync = () =>
+            {
+                entered.TrySetResult();
+                return release.Task;
+            };
+
+            var readTask = coordinator.GetMyReservationsAsync("A");
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(2));
+
+            // Primary epoch changes while store read is in-flight
+            gate.CurrentEpoch += 1;
+            release.SetResult();
+
+            bool threw = false;
+            try
+            {
+                await readTask;
+            }
+            catch (InvalidOperationException)
+            {
+                threw = true;
+            }
+            AssertTrue(threw);
+        });
+
+        await RunTestAsync("Q5/Q6: Two-Node Contract Simulation - Primary Coordinator + ReplicaSender to Backup Channel achieves Stable FINAL", async () =>
+        {
+            var primaryStore = new FakeBookingStore();
+            var primaryGate = new FakeAuthorityGate();
+            var backupStore = new FakeBookingStore();
+
+            // Backup channel connects Primary (Node 1) to Backup (Node 2)
+            var backupChannel = new FakePeerChannel(2)
+            {
+                CustomReceiptFactory = e =>
+                {
+                    backupStore.AppliedEvents.Add(e);
+                    return new AppliedReceipt(2, e.Epoch, e.Epoch, e.LogIndex, e.EventId, e.EventHash, null);
+                }
+            };
+
+            var sender = new SynchronousReplicaSender([backupChannel], localNodeId: 1);
+            await using var primaryCoordinator = new CommandCoordinator(Fixtures.SampleDatasetId, primaryGate, primaryStore, sender);
+
+            var reqId = Guid.NewGuid();
+            var holdCmd = Fixtures.CreateHoldCommand(Fixtures.SampleDatasetId, reqId, "A", 3);
+            var reply = await primaryCoordinator.SubmitAsync(holdCmd, CancellationToken.None);
+
+            AssertEqual(TransportStatus.Final, reply.Status);
+            AssertNotNull(reply.Result);
+            AssertEqual(ResultCodes.OkHeld, reply.Result!.Code);
+            AssertEqual(1, primaryStore.GetStableIndex());
+            AssertEqual(1, backupStore.AppliedEvents.Count);
+            AssertEqual(1, backupStore.AppliedEvents[0].LogIndex);
+        });
+
+        await RunTestAsync("Q5/Q6: Two-Node Contract Simulation - Backup failure prevents Stable advance and returns Unknown", async () =>
+        {
+            var primaryStore = new FakeBookingStore();
+            var primaryGate = new FakeAuthorityGate();
+
+            // Backup channel 2 fails (e.g. timeout or disconnect)
+            var backupChannel = new FakePeerChannel(2) { ShouldSucceed = false };
+
+            var sender = new SynchronousReplicaSender([backupChannel], localNodeId: 1);
+            await using var primaryCoordinator = new CommandCoordinator(Fixtures.SampleDatasetId, primaryGate, primaryStore, sender);
+
+            var reqId = Guid.NewGuid();
+            var holdCmd = Fixtures.CreateHoldCommand(Fixtures.SampleDatasetId, reqId, "A", 4);
+            var reply = await primaryCoordinator.SubmitAsync(holdCmd, CancellationToken.None);
+
+            AssertEqual(TransportStatus.Unknown, reply.Status);
+            AssertEqual(0, primaryStore.GetStableIndex());
+        });
 
         Console.WriteLine($"\n========================================");
         Console.WriteLine($"Summary: {_count - _failures}/{_count} tests PASSED.");

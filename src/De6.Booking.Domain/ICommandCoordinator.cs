@@ -16,6 +16,9 @@ public interface IBookingStore : IRequestResultLookup
     ValueTask<IReadOnlyList<SeatView>> GetAllSeatsAsync(CancellationToken cancellationToken = default);
     ValueTask<ReservationRecord?> GetReservationAsync(Guid reservationId, CancellationToken cancellationToken = default);
     ValueTask<TicketRecord?> GetTicketByReservationAsync(Guid reservationId, CancellationToken cancellationToken = default);
+    ValueTask<IReadOnlyList<ReservationRecord>> GetReservationsByOwnerAsync(string ownerId, CancellationToken cancellationToken = default);
+    // Implementations must read rows and metadata in one transaction and reject an index mismatch.
+    ValueTask<StableReservationsSnapshot> ReadReservationsSnapshotAsync(string ownerId, long expectedIndex, CancellationToken cancellationToken = default);
 
     Task<PersistedEvent> ApplyLocalAsync(
         AuthenticatedCommand command,
@@ -34,4 +37,5 @@ public interface ICommandCoordinator : IAsyncDisposable
     Task<CommandReply> SubmitAsync(AuthenticatedCommand command, CancellationToken replyCancellation);
     Task<StableSnapshot> GetSeatsAsync(CancellationToken cancellationToken = default);
     Task<CommandReply> GetResultAsync(Guid requestId, string ownerId, CancellationToken cancellationToken = default);
+    Task<StableReservationsSnapshot> GetMyReservationsAsync(string authenticatedOwnerId, CancellationToken cancellationToken = default);
 }
