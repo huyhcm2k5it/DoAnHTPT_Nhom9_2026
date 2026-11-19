@@ -111,7 +111,7 @@ internal static class ReviewRegressionCases
             await Refuse(new(db.ConnectionString));
             SqlTest.Require(Convert.ToInt32(await SqlTest.Scalar(db.ConnectionString,"SELECT COUNT(*) FROM dbo.Seats"))==10,"Refusal changed seed data");
             SqlTest.Require(Convert.ToInt64(await SqlTest.Scalar(db.ConnectionString,"SELECT AcceptedEpoch FROM dbo.NodeState"))==1,"Refusal reset authority");
-            var expected=marker.EndsWith("Checksum",StringComparison.Ordinal)?"tampered":"2";
+            var expected=marker.EndsWith("Checksum",StringComparison.Ordinal)?"tampered":"3";
             SqlTest.Require(Convert.ToString(await SqlTest.Scalar(db.ConnectionString,$"SELECT CONVERT(nvarchar(64),value) FROM sys.extended_properties WHERE class=0 AND name=N'{marker}'"))==expected,"Refusal rewrote marker");
         });
         await Case("missing schema object is refused without repairing silently",async()=>
