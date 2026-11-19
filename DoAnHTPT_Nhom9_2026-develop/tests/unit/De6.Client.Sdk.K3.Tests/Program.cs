@@ -340,6 +340,52 @@ await Check(
         }
     });
 
+await Check(
+    "K3-T08 - Restore canonical command bytes after restart",
+    async () =>
+    {
+        string root = CreateRoot();
+        try
+        {
+            await using (var first = new FileClientPendingStore(root, datasetId, ownerId))
+            {
+                await first.SaveBeforeSendAsync(identity, canonicalCommand, CancellationToken.None);
+            }
+            await using var second = new FileClientPendingStore(root, datasetId, ownerId);
+            IReadOnlyList<PendingCommand> pending = await second.ReadUnresolvedCommandsAsync(CancellationToken.None);
+            return pending.Count == 1 && pending[0].Identity == identity &&
+                pending[0].CanonicalCommand.Span.SequenceEqual(canonicalCommand) &&
+                pending[0].SavedUtc != default;
+        }
+        finally
+        {
+            Directory.Delete(root, true);
+        }
+    });
+
+await Check(
+    "K3-T09 - Restore resolved result bytes after restart",
+    async () =>
+    {
+        string root = CreateRoot();
+        try
+        {
+            await using (var first = new FileClientPendingStore(root, datasetId, ownerId))
+            {
+                await first.SaveBeforeSendAsync(identity, canonicalCommand, CancellationToken.None);
+                await first.SaveResolvedAsync(requestId, resultPayload, CancellationToken.None);
+            }
+            await using var second = new FileClientPendingStore(root, datasetId, ownerId);
+            IReadOnlyList<ResolvedCommand> resolved = await second.ReadResolvedAsync(CancellationToken.None);
+            return resolved.Count == 1 && resolved[0].RequestId == requestId &&
+                resolved[0].ResultPayload.Span.SequenceEqual(resultPayload) && resolved[0].ResolvedUtc != default;
+        }
+        finally
+        {
+            Directory.Delete(root, true);
+        }
+    });
+
 Console.WriteLine();
 Console.WriteLine("================================");
 Console.WriteLine("       K3 PENDING STORE TESTS");

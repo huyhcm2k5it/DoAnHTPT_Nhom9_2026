@@ -220,6 +220,46 @@ public sealed class FileClientPendingStore : IClientPendingStore
         }
     }
 
+    public async ValueTask<IReadOnlyList<PendingCommand>> ReadUnresolvedCommandsAsync(CancellationToken cancellationToken)
+    {
+        await _mutex.WaitAsync(cancellationToken);
+        try
+        {
+            ThrowIfDisposed();
+            StoreDocument document = await LoadDocumentAsync(cancellationToken);
+            return document.Pending
+                .Select(x => new PendingCommand(
+                    x.Identity,
+                    Convert.FromBase64String(x.CanonicalCommandBase64),
+                    x.SavedUtc))
+                .ToArray();
+        }
+        finally
+        {
+            _mutex.Release();
+        }
+    }
+
+    public async ValueTask<IReadOnlyList<ResolvedCommand>> ReadResolvedAsync(CancellationToken cancellationToken)
+    {
+        await _mutex.WaitAsync(cancellationToken);
+        try
+        {
+            ThrowIfDisposed();
+            StoreDocument document = await LoadDocumentAsync(cancellationToken);
+            return document.Resolved
+                .Select(x => new ResolvedCommand(
+                    x.RequestId,
+                    Convert.FromBase64String(x.ResultPayloadBase64),
+                    x.ResolvedUtc))
+                .ToArray();
+        }
+        finally
+        {
+            _mutex.Release();
+        }
+    }
+
     public async ValueTask SaveResolvedAsync(
         Guid requestId,
         ReadOnlyMemory<byte> resultPayload,
@@ -380,6 +420,15 @@ public sealed class FileClientPendingStore : IClientPendingStore
         document.Pending ??= [];
         document.Resolved ??= [];
 
+        if (document.Pending.Select(x => x.Identity?.RequestId).Distinct().Count() != document.Pending.Count)
+            throw new InvalidDataException("Pending store contains duplicate RequestId values.");
+
+        if (document.Resolved.Select(x => x.RequestId).Distinct().Count() != document.Resolved.Count)
+            throw new InvalidDataException("Pending store contains duplicate resolved RequestId values.");
+
+        if (document.Pending.Any(x => document.Resolved.Any(y => y.RequestId == x.Identity.RequestId)))
+            throw new InvalidDataException("A RequestId cannot be both pending and resolved.");
+
         foreach (PendingEntry entry in document.Pending)
         {
             if (entry.Identity is null ||
@@ -401,6 +450,13 @@ public sealed class FileClientPendingStore : IClientPendingStore
 
             Convert.FromBase64String(
                 entry.CanonicalCommandBase64);
+        }
+
+        foreach (ResolvedEntry entry in document.Resolved)
+        {
+            if (entry.RequestId == Guid.Empty || string.IsNullOrWhiteSpace(entry.ResultPayloadBase64))
+                throw new InvalidDataException("Resolved entry is invalid.");
+            Convert.FromBase64String(entry.ResultPayloadBase64);
         }
 
         return document;
