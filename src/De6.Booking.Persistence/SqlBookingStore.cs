@@ -81,7 +81,11 @@ public sealed partial class SqlBookingStore : IBookingStore, IRecoveryEvidenceSt
             var result=await work(connection,transaction,node);
             if(result.Entry!=null && observer!=null) await observer.BeforeCommitAsync(result.Entry);
             await transaction.CommitAsync(CancellationToken.None);
-            if(result.Entry!=null && observer!=null) await observer.AfterCommitAsync(result.Entry);
+            if(result.Entry!=null)
+            {
+                if(observer!=null) await observer.AfterCommitAsync(result.Entry);
+                if(gate is ILocalApplyProgress progress) progress.RecordLocalAppliedIndex(result.Entry.LogIndex);
+            }
             return result.Value;
         }
         catch(OperationCanceledException) when(preparing && cancellation.IsCancellationRequested)

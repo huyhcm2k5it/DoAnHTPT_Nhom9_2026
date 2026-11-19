@@ -23,7 +23,7 @@ public sealed record ClusterControlSnapshot(int NodeId, Guid DatasetId, ServingR
 /// Owns local serving authority and the SQL access gate. A process always starts closed.
 /// Only recovery code in this assembly can apply a verified activation.
 /// </summary>
-public sealed class ClusterControl : IAuthorityGate, IStoreAccessGate
+public sealed class ClusterControl : IAuthorityGate, IStoreAccessGate, ILocalApplyProgress
 {
     private readonly object _sync = new();
     private readonly int _nodeId;

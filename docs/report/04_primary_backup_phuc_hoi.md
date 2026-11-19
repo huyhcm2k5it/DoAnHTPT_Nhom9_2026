@@ -6,7 +6,7 @@ Nguồn sách là ND14/ND12 và sách Nguyễn Xuân Anh, *Bài giảng Hệ th�
 
 ## Huy về durable Apply và receipt
 
-Giải thích transaction ghi event/result/projection, thời điểm commit bền vững, cách receiver xử lý duplicate/GAP/conflict và vì sao ACK chỉ được tạo sau receipt từ store. Liên hệ `SqlBookingStore`, `AppendAndApplyAsync`, T11, T13–T15 và oracle SQL. Nêu giới hạn của một node local.
+Một lần Apply lưu event, kết quả và projection trong cùng transaction. Receiver chỉ trả receipt khi SQL đã commit và cập nhật mốc LocalApplied của Control. Nếu ACK bị mất sau commit, lần retry giữ nguyên EventId và bytes. Backup đối chiếu bản đã ghi rồi trả receipt cùng nội dung mà không Apply lại. GAP báo index cần tiếp theo. Conflict giữ dữ liệu cũ và đóng cổng. LocalApplied và receipt là các bằng chứng để coordinator kiểm hai bản sao trước khi trả FINAL. [Lý thuyết, trace T11/T13–T15 và oracle phía Huy](01_huy_giao_tac.md)
 
 ## Gia Quân về replication và FINAL
 

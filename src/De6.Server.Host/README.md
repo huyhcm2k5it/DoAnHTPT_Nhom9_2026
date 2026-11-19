@@ -2,7 +2,7 @@
 
 Owner: Huy (tích hợp cả nhóm).
 
-Runnable closed bootstrap: validates configuration and always starts RECOVERING/ServingEnabled=false. `--check` validates files without SQL access. `--check-sql` probes an existing configured database read-only and exits. Normal startup probes configured SQL before waiting for Ctrl+C. No TCP listener, coordinator, election, replication, activation or booking processing is wired.
+Runnable closed bootstrap: validates configuration and starts RECOVERING/ServingEnabled=false. `--check` validates files without SQL access. `--check-sql` probes an existing configured database read-only and exits. After a successful probe, Host composes a shared Control, SQL store and authenticated peer receiver using the local SQL cursor and persisted authority as recovery evidence. The pure Domain decision runs inside SQL Apply. TCP/TLS dispatch, coordinator integration, election scheduling and activation are integration steps still to be wired.
 
 SQL settings, local/LAN database names, exit codes, and the composition boundary are documented in [HUY_HOST_SQL](../../docs/implementation/HUY_HOST_SQL.md). The factory requires the real gate and decision engine supplied by their module owners; the Host never constructs substitutes.
 
