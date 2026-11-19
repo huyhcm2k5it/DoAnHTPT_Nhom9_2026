@@ -42,7 +42,7 @@ public interface IStoreAccessGate
 {
     IDisposable EnterPrimary(AcceptedAuthority authority, long expectedNextIndex);
     IDisposable EnterAppend(AuthenticatedPeerAuthority peer);
-    IDisposable EnterReplay(RecoveryContext context);
+    IDisposable EnterReplay(AuthenticatedPeerIdentity authenticatedSource, RecoveryContext context);
     IDisposable EnterSnapshot(long expectedIndex);
     IDisposable EnterRecoveryInspection();
     IDisposable EnterMaintenance(long expectedIndex);
@@ -64,7 +64,8 @@ public interface IBookingStore
         long expectedNextIndex, CancellationToken cancellation = default);
     Task<AppliedReceipt> AppendAndApplyAsync(PersistedEvent entry, AuthenticatedPeerAuthority peer,
         CancellationToken cancellation = default);
-    Task<AppliedReceipt> ApplyReplayEntryAsync(PersistedEvent entry, RecoveryContext context,
+    Task<AppliedReceipt> ApplyReplayEntryAsync(PersistedEvent entry, AuthenticatedPeerIdentity authenticatedSource,
+        RecoveryContext context,
         CancellationToken cancellation = default);
     Task<StableSnapshot> ReadStableSnapshotAsync(long expectedIndex, CancellationToken cancellation = default);
     Task<StoredResultSnapshot?> ReadStableResultAsync(Guid requestId, string owner, long expectedIndex,

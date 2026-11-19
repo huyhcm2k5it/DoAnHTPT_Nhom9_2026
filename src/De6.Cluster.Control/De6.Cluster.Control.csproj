@@ -1,4 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup>
-  <ItemGroup><ProjectReference Include="../De6.Contracts/De6.Contracts.csproj" /></ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../De6.Booking.Domain/De6.Booking.Domain.csproj" />
+    <ProjectReference Include="../De6.Cluster.Election/De6.Cluster.Election.csproj" />
+    <ProjectReference Include="../De6.Contracts/De6.Contracts.csproj" />
+  </ItemGroup>
 </Project>

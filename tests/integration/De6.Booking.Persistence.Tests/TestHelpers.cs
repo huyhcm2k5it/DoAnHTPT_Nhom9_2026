@@ -1,6 +1,8 @@
 using De6.Contracts;
 using De6.Booking.Persistence;
 using Microsoft.Data.SqlClient;
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 
 internal sealed class TestGate : IStoreAccessGate
 {
@@ -13,7 +15,12 @@ internal sealed class TestGate : IStoreAccessGate
     public IDisposable EnterPrimary(AcceptedAuthority authority, long expectedNextIndex)
         => Enter(() => !Blocked && !Maintenance && authority == new AcceptedAuthority(1,1) && expectedNextIndex == StableIndex+1);
     public IDisposable EnterAppend(AuthenticatedPeerAuthority peer) => Enter(() => !Blocked);
-    public IDisposable EnterReplay(RecoveryContext context) => Enter(() => InstalledRecovery == context);
+    public IDisposable EnterReplay(AuthenticatedPeerIdentity authenticatedSource, RecoveryContext context)
+        => Enter(() => authenticatedSource.NodeId == context.SourceNodeId &&
+            InstalledRecovery is { } installed &&
+            installed == (context with { BaseHash = installed.BaseHash, HeadHash = installed.HeadHash }) &&
+            installed.BaseHash.Span.SequenceEqual(context.BaseHash.Span) &&
+            installed.HeadHash.Span.SequenceEqual(context.HeadHash.Span));
     public IDisposable EnterSnapshot(long expectedIndex) => Enter(() => !Blocked && !Maintenance && expectedIndex == StableIndex);
     public IDisposable EnterRecoveryInspection() => Enter(() => true);
     public IDisposable EnterMaintenance(long expectedIndex) => Enter(() => Maintenance);
@@ -26,6 +33,33 @@ internal sealed class TestGate : IStoreAccessGate
         return new Lease(mutex);
     }
     private sealed class Lease(SemaphoreSlim mutex) : IDisposable { public void Dispose() => mutex.Release(); }
+}
+
+internal static class TestPeerIdentityFactory
+{
+    internal static AuthenticatedPeerIdentity Create(int localNodeId, int remoteNodeId)
+    {
+        var certificates = Enumerable.Range(1, 3).Select(nodeId => CreateCertificate(nodeId)).ToArray();
+        try
+        {
+            var pins = certificates.Select((certificate, index) => (NodeId: index + 1,
+                Pin: certificate.GetCertHashString(HashAlgorithmName.SHA256))).ToDictionary(item => item.NodeId, item => item.Pin);
+            return new PeerCertificateAuthenticator(localNodeId, pins).Authenticate(
+                certificates[remoteNodeId - 1], remoteNodeId, DateTimeOffset.UtcNow);
+        }
+        finally
+        {
+            foreach (var certificate in certificates) certificate.Dispose();
+        }
+    }
+
+    private static X509Certificate2 CreateCertificate(int nodeId)
+    {
+        using var rsa = RSA.Create(2048);
+        var request = new CertificateRequest($"CN=de6-test-node-{nodeId}", rsa,
+            HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        return request.CreateSelfSigned(DateTimeOffset.UtcNow.AddMinutes(-1), DateTimeOffset.UtcNow.AddHours(1));
+    }
 }
 
 // Test-only decision fixture. This is NOT Gia Quân's production decision engine.

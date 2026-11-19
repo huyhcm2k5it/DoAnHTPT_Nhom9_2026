@@ -94,7 +94,7 @@ sealed class InspectionOnlyGate : IStoreAccessGate
     public IDisposable EnterRecoveryInspection()=>new Lease();
     public IDisposable EnterPrimary(AcceptedAuthority authority,long expectedNextIndex)=>Denied();
     public IDisposable EnterAppend(AuthenticatedPeerAuthority peer)=>Denied();
-    public IDisposable EnterReplay(RecoveryContext context)=>Denied();
+    public IDisposable EnterReplay(AuthenticatedPeerIdentity authenticatedSource,RecoveryContext context)=>Denied();
     public IDisposable EnterSnapshot(long expectedIndex)=>Denied();
     public IDisposable EnterMaintenance(long expectedIndex)=>Denied();
     public void Block(string reason) { }

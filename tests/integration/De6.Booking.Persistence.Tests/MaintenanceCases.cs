@@ -28,6 +28,15 @@ internal static class MaintenanceCases
         var other=await backup.GetFrozenPrefixAsync(2);
         SqlTest.Require(frozen.BusinessDigest.Span.SequenceEqual(other.BusinessDigest.Span) && frozen.HeadHash.Span.SequenceEqual(other.HeadHash.Span),"Replica digest mismatch");
         Console.WriteLine("PASS H5 frozen digest is identical across different NodeIds");
+        var primaryHistory=await store.GetVerifiedRecoveryHistoryAsync(2);
+        var backupHistory=await backup.GetVerifiedRecoveryHistoryAsync(2);
+        primaryHistory.Validate();backupHistory.Validate();
+        var allCheckpointsMatch=primaryHistory.Checkpoints.Count==3 && backupHistory.Checkpoints.Count==3;
+        for(var index=0;allCheckpointsMatch && index<primaryHistory.Checkpoints.Count;index++)
+            allCheckpointsMatch=primaryHistory.Checkpoints[index].HeadHash.Span.SequenceEqual(backupHistory.Checkpoints[index].HeadHash.Span) &&
+                primaryHistory.Checkpoints[index].BusinessDigest.Span.SequenceEqual(backupHistory.Checkpoints[index].BusinessDigest.Span);
+        SqlTest.Require(allCheckpointsMatch,"Verified recovery history did not expose matching audited checkpoints");
+        Console.WriteLine("PASS A4 frozen SQL history provides verified hash/digest at every prefix");
         await SqlTest.Execute(db.ConnectionString,"UPDATE dbo.RequestResults SET ResultPayloadBytes=0x7B7D");
         SqlTest.Require(!(await store.AuditLocalAsync()).MatchesHistory,"Digest missed altered result bytes");
         await SqlTest.Execute(db.ConnectionString,"DELETE dbo.Tickets");

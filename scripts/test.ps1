@@ -7,6 +7,10 @@ $smokeHarness = Join-Path $RepoRoot "tests/De6.Template.SmokeTests/bin/$Configur
 & $DotnetPath $smokeHarness
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+$clusterControlHarness = Join-Path $RepoRoot "tests/unit/De6.Cluster.Control.Tests/bin/$Configuration/net10.0/De6.Cluster.Control.Tests.dll"
+& $DotnetPath $clusterControlHarness
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
 $domainHarness = Join-Path $RepoRoot "tests/unit/De6.Domain.UnitTests/bin/$Configuration/net10.0/De6.Domain.UnitTests.dll"
 & $DotnetPath $domainHarness
 exit $LASTEXITCODE

@@ -2,11 +2,11 @@
 
 Owner: Đức An.
 
-Implement Bully rounds, eligibility, heartbeat and monotonic timeouts. Candidate selection NEVER opens ServingEnabled and cannot replace physical fencing. ElectionNotice is a draft message shape, not an algorithm. V12 section 12; T22-T26, T35-T36.
+`BullyElection` implements the Bully message state machine, eligibility checks and answer/coordinator timeout transitions. The future Host/transport adapter must schedule those transitions with a monotonic timer and forward only notices whose peer certificate was pinned. `HeartbeatFailureDetector` tracks authenticated members and suspects a peer after three missed one-second intervals. Election results only nominate a candidate. They never open serving rights or replace physical fencing. The isolated week-one checks are in `tests/unit/De6.Cluster.Control.Tests`. V12 section 12; T22-T26, T35-T36.
 
 Specification: [V12](../../docs/De6_Thiet_Ke_Trien_Khai_V12.md). Team handoff and commands: [repository README](../../README.md).
 
-Definition of done for future implementation: reviewed shared contracts, tests for owned V12 cases, error/uncertainty paths, and reproducible evidence. A successful template build does not satisfy business acceptance.
+Network transport, timeout scheduling, coordinator integration and multi-node fault runs remain for integration. Passing the election state-machine tests does not satisfy cluster acceptance.
 
 ## Hướng dẫn bắt đầu
 

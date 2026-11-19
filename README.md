@@ -4,7 +4,7 @@ Mô phỏng bán vé một chuyến tàu 10 ghế theo [đặc tả V12](docs/De
 
 ## Trạng thái hiện tại
 
-Đây là bộ khung để bốn thành viên phát triển. Server kiểm tra cấu hình, có probe SQL chỉ đọc khi được cấu hình, và báo `RECOVERING`, `ServingEnabled=false`; chưa lắng nghe như dịch vụ bán vé thực. WinForms có 10 ghế bị vô hiệu hóa và nhãn kết nối chưa triển khai. Nhánh feature/huy-database đã có component SQL Persistence H1–H6, oracle/rebuild, probe/composition SQL của Host và test SQL thật; chưa ghép luồng booking đầu cuối; TLS, bầu chọn và replication mạng còn phải triển khai. Không có kết quả FINAL giả. Các phép kiểm tra bootstrap không thay cho nghiệm thu T01–T36.
+Đây là bản cơ sở đang được bốn thành viên phát triển. Server kiểm tra cấu hình, có probe SQL chỉ đọc khi được cấu hình, và luôn báo `RECOVERING`, `ServingEnabled=false`; chưa lắng nghe như dịch vụ bán vé thực. WinForms có 10 ghế bị vô hiệu hóa và nhãn kết nối chưa triển khai. Nhánh `feature/huy-database` có Persistence H1–H6, oracle/rebuild, probe/composition SQL của Host và test SQL thật. Nhánh `feature/duc-an-election` bổ sung Control/gate, Bully state machine, heartbeat detector và ánh xạ certificate pin sang NodeId. Booking service, kết nối coordinator với SQL, TLS/TCP listener và vòng election qua mạng vẫn cần ghép. Không có kết quả FINAL giả. Các phép kiểm tra bootstrap không thay cho nghiệm thu T01–T36.
 
 Đích triển khai là ba server có ba SQL Server 2022 độc lập và ba quầy A/B/C. Máy kiểm thử Persistence hiện là SQL Server 2025 Express, chưa xác nhận riêng trên engine 2022; build và chạy kiểm tra bộ khung hiện tại không cần cơ sở dữ liệu.
 
@@ -28,7 +28,7 @@ dotnet --info
 .\scripts\start-client.ps1 -ClientId 3 -Check
 ```
 
-`test.ps1` build solution rồi chạy executable harness smoke, persistence contracts và Host/persistence offline; đây không phải bộ test được `dotnet test` tự khám phá. `test-huy-sql.ps1` chạy thêm Persistence và Host trên SQL Server thật bằng các database tạm. `-Check` xác minh cấu hình rồi thoát, không mở giao diện hoặc tạo dịch vụ bán vé. Mỗi script trả exit code để phát hiện lỗi. Nếu chưa có SDK ở cả PATH lẫn `.tools/dotnet/`, cài/giải nén SDK .NET 10 tương thích trước khi chạy; script không tự cài phần mềm hay đổi execution policy.
+`test.ps1` build solution rồi chạy smoke, Control/Election và Domain harness. Đây là các executable harness, không được `dotnet test` tự khám phá. `test-huy-sql.ps1` kiểm tra Persistence/Host trên SQL Server thật bằng các database tạm. `-Check` xác minh cấu hình rồi thoát, không mở giao diện hoặc tạo dịch vụ bán vé. Mỗi script trả exit code để phát hiện lỗi. Nếu chưa có SDK ở cả PATH lẫn `.tools/dotnet/`, cài/giải nén SDK .NET 10 tương thích trước khi chạy; script không tự cài phần mềm hay đổi execution policy.
 
 Mở từng terminal riêng để quan sát tiến trình:
 

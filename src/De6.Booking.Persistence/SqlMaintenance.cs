@@ -5,6 +5,28 @@ using System.Text;
 namespace De6.Booking.Persistence;
 public sealed partial class SqlBookingStore
 {
+    public async Task<VerifiedRecoveryHistory> GetVerifiedRecoveryHistoryAsync(long expectedIndex,
+        CancellationToken cancellationToken=default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        using var lease=gate.EnterMaintenance(expectedIndex);
+        return await Transaction(async(c,t,node)=>
+        {
+            Require(node.Index==expectedIndex,StoreRejection.IndexMismatch,node.Index);
+            var audit=await Audit(c,t,node);
+            Require(audit.MatchesHistory,StoreRejection.InvariantViolation);
+            var history=await History(c,t,node);
+            AcceptedAuthority? authority;
+            if(node.Epoch==0 && node.Leader is null) authority=null;
+            else if(node.Epoch>0 && node.Leader is >=1 and <=3) authority=new AcceptedAuthority(node.Epoch,node.Leader.Value);
+            else throw new StoreRejectedException(StoreRejection.InvariantViolation);
+
+            var proof=new VerifiedRecoveryHistory(options.NodeId,options.DatasetId,node.SchemaVersion,authority,node.Index,
+                node.Hash,audit.BusinessDigest,audit.MatchesHistory,true,history.Checkpoints);
+            return (proof,(PersistedEvent?)null);
+        },null,cancellationToken);
+    }
+
     public async Task<LocalStorageAudit> AuditLocalAsync(CancellationToken cancellation=default)
     {
         cancellation.ThrowIfCancellationRequested();
@@ -25,7 +47,7 @@ public sealed partial class SqlBookingStore
             Require(node.Index==expectedIndex,StoreRejection.IndexMismatch,node.Index);
             var audit=await Audit(c,t,node);
             Require(audit.MatchesHistory,StoreRejection.InvariantViolation);
-            return (new FrozenPrefixReport(options.NodeId,options.DatasetId,1,node.Index,node.Hash.ToArray(),audit.BusinessDigest.ToArray()),(PersistedEvent?)null);
+            return (new FrozenPrefixReport(options.NodeId,options.DatasetId,node.SchemaVersion,node.Index,node.Hash.ToArray(),audit.BusinessDigest.ToArray()),(PersistedEvent?)null);
         },null,cancellation);
     }
 
@@ -51,7 +73,7 @@ public sealed partial class SqlBookingStore
             }
             var audit=await Audit(c,t,node);
             Require(audit.MatchesHistory,StoreRejection.InvariantViolation);
-            var report=new FrozenPrefixReport(options.NodeId,options.DatasetId,1,node.Index,node.Hash.ToArray(),audit.BusinessDigest.ToArray());
+            var report=new FrozenPrefixReport(options.NodeId,options.DatasetId,node.SchemaVersion,node.Index,node.Hash.ToArray(),audit.BusinessDigest.ToArray());
             return (report,history.Entries.LastOrDefault());
         },null,cancellation);
     }
@@ -90,9 +112,16 @@ public sealed partial class SqlBookingStore
         }
     }
 
-    private async Task<(List<PersistedEvent> Entries,HistoryProjection Projection)> History(SqlConnection c,SqlTransaction t,Node node)
+    private sealed record VerifiedHistory(List<PersistedEvent> Entries,HistoryProjection Projection,
+        IReadOnlyList<RecoveryHistoryCheckpoint> Checkpoints);
+
+    private async Task<VerifiedHistory> History(SqlConnection c,SqlTransaction t,Node node)
     {
         var entries=new List<PersistedEvent>();var model=new HistoryProjection();var hash=SeedHash();long index=0;
+        var checkpoints=new List<RecoveryHistoryCheckpoint>
+        {
+            new(0,ReadOnlyMemory<byte>.Empty,hash,ProjectionDigest.Compute(options.DatasetId,0,model.Material()))
+        };
         using var command=SqlSupport.Command(c,t,"SELECT LogIndex,Epoch,WriterId,EventId,RequestId,PreviousHash,EventHash,PayloadBytes FROM dbo.OperationLog ORDER BY LogIndex");
         await using var reader=await command.ExecuteReaderAsync();
         while(await reader.ReadAsync())
@@ -105,12 +134,14 @@ public sealed partial class SqlBookingStore
                 Require(e.RequestId==reader.GetGuid(4) && entry.LogIndex==++index &&
                     e.PreviousHash==Convert.ToHexStringLower(hash) && ((byte[])reader[5]).AsSpan().SequenceEqual(hash),StoreRejection.PrefixConflict);
                 model.Apply(e,entry);hash=entry.EventHash.ToArray();entries.Add(entry);
+                checkpoints.Add(new RecoveryHistoryCheckpoint(index,Convert.FromHexString(e.PreviousHash),hash,
+                    ProjectionDigest.Compute(options.DatasetId,index,model.Material())));
             }
             catch(Exception e) when(e is ArgumentException or System.Text.Json.JsonException or FormatException or StoreRejectedException)
             {throw new StoreRejectedException(StoreRejection.PrefixConflict);}
         }
         Require(index==node.Index && hash.AsSpan().SequenceEqual(node.Hash),StoreRejection.PrefixConflict);
-        return (entries,model);
+        return new VerifiedHistory(entries,model,checkpoints);
     }
 
     private static async Task<StorageProjection> Projection(SqlConnection c,SqlTransaction t)

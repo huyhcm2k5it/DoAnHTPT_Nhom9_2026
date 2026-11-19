@@ -75,16 +75,18 @@ try
     var first=BookingEventCodec.Decode(applied.Event);
     var context=new RecoveryContext(Guid.NewGuid(),dataset,1,3,2,2,0,Convert.FromHexString(first.PreviousHash),1,applied.Event.EventHash);
     replayGate.InstalledRecovery=context;
-    var replayReceipt=await replayStore.ApplyReplayEntryAsync(applied.Event,context);
+    var replaySource=TestPeerIdentityFactory.Create(3,1);
+    var replayReceipt=await replayStore.ApplyReplayEntryAsync(applied.Event,replaySource,context);
     SqlTest.Require(replayReceipt.AuthorityEpoch==2 && replayReceipt.EventEpoch==1 && replayReceipt.RecoveryRunId==context.RunId,"Replay changed historical authority");
     SqlTest.Require(Convert.ToInt64(await SqlTest.Scalar(replayDb.ConnectionString,"SELECT AcceptedEpoch FROM dbo.NodeState"))==0,"Replay granted authority");
     SqlTest.Require(Convert.ToInt32(await SqlTest.Scalar(replayDb.ConnectionString,"SELECT NodeId FROM dbo.NodeState"))==3,"Replay copied NodeId");
-    await replayStore.ApplyReplayEntryAsync(applied.Event,context);
+    await replayStore.ApplyReplayEntryAsync(applied.Event,replaySource,context);
     SqlTest.Require(Convert.ToInt32(await SqlTest.Scalar(replayDb.ConnectionString,"SELECT COUNT(*) FROM dbo.OperationLog"))==1,"Replay duplicated event");
     Console.WriteLine("PASS H3 historical replay retains event epoch/identity without granting serving rights");
     await AdvancedCases.Run(server,applied.Event);
     await ReviewRegressionCases.Run(server,applied.Event);
     await MaintenanceCases.Run(server);
+    await RecoveryManifestCases.Run(server);
     return 0;
 }
 catch (Exception exception)

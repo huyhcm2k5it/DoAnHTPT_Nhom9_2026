@@ -2,11 +2,17 @@
 
 Owner: Đức An (phối hợp Huy về store/replay và Văn Khoa về kết nối peer).
 
-Own serving gates and coordinated recovery/activation. Only immutable BootstrapState exists: RECOVERING, ServingEnabled=false, StableIndex=0 every boot. No activation, promotion, manifest, fencing, SQL or recovery is implemented. Future ClusterControl must synchronize grants and administrative transitions. V12 sections 5, 12-14, 16-17.
+`ClusterControl` implements both the Domain `IAuthorityGate` and SQL `IStoreAccessGate` contracts so Host can supply one shared instance when it composes the booking service. It starts every process in `RECOVERING` with `StableIndex=0`, restricts mutation, append, snapshot, replay and maintenance leases by role/epoch/index, and closes admission before maintenance. Election results are recorded separately from serving authority. Week-two core adds promotion/bootstrap/rejoin planning, physical-fence verification ports, manifest readback verification and SQL-backed durable manifests. `ApplyVerifiedActivation` requires an authorization minted by the verifier, and the node's local applied index must equal the manifest target. The current Host still only prints the closed boot state because it does not compose recovery, election, transport or a booking service. V12 sections 5, 12-14, 16-17.
 
 Specification: [V12](../../docs/De6_Thiet_Ke_Trien_Khai_V12.md). Team handoff and commands: [repository README](../../README.md).
 
-Definition of done for future implementation: reviewed shared contracts, tests for owned V12 cases, error/uncertainty paths, and reproducible evidence. A successful template build does not satisfy business acceptance.
+Control/planner code is covered by `tests/unit/De6.Cluster.Control.Tests`; SQL manifest persistence has a separate integration harness. No production physical-fence adapter or Host recovery workflow is wired yet. The Host/transport path and three-node SQL failure tests remain integration work, so passing isolated tests does not satisfy cluster acceptance.
+
+## Công cụ cần có
+
+- .NET 10 SDK để build và chạy harness; không cần cài thư viện riêng cho `Cluster.Control` hoặc `Cluster.Election`.
+- SQL Server chỉ cần khi chạy SQL integration của manifest/replay hoặc ghép database thật. SSMS là tùy chọn để xem database.
+- Test tự tạo chứng thư tạm để kiểm pin peer. Chứng thư/TLS production chỉ cần khi Host/transport thật được nối.
 
 ## Hướng dẫn bắt đầu
 

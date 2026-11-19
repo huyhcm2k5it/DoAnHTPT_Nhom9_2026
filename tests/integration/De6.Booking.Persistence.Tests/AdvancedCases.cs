@@ -117,15 +117,19 @@ internal static class AdvancedCases
         {
             var gate=new TestGate(); var store=new SqlBookingStore(new(db.ConnectionString,Dataset,3),gate);
             var context=new RecoveryContext(Guid.NewGuid(),Dataset,1,3,2,2,0,Convert.FromHexString(initial.PreviousHash),1,original.EventHash);
-            await Case("replay requires locally installed context",()=>Rejected(async()=>{await store.ApplyReplayEntryAsync(original,context);},StoreRejection.NotReady));
+            var replaySource=TestPeerIdentityFactory.Create(3,1);
+            await Case("replay requires locally installed context",()=>Rejected(async()=>{await store.ApplyReplayEntryAsync(original,replaySource,context);},StoreRejection.NotReady));
             gate.InstalledRecovery=context;
-            await store.ApplyReplayEntryAsync(original,context);
+            var wrongReplaySource=TestPeerIdentityFactory.Create(3,2);
+            await Case("replay source must match locally installed context",()=>Rejected(async()=>
+            {await store.ApplyReplayEntryAsync(original,wrongReplaySource,context);},StoreRejection.NotReady));
+            await store.ApplyReplayEntryAsync(original,replaySource,context);
             await Case("replay cannot install authority or copy node identity",async()=>
             {
                 SqlTest.Require(await N(db.ConnectionString,"SELECT NodeId FROM dbo.NodeState")==3 && await N(db.ConnectionString,"SELECT AcceptedEpoch FROM dbo.NodeState")==0,"Replay changed local metadata");
             });
             await Case("replay rejects entry beyond pinned K",()=>Rejected(async()=>
-            {await store.ApplyReplayEntryAsync(BookingEventCodec.Encode(initial with{LogIndex=2}),context);},StoreRejection.IndexMismatch));
+            {await store.ApplyReplayEntryAsync(BookingEventCodec.Encode(initial with{LogIndex=2}),replaySource,context);},StoreRejection.IndexMismatch));
             await Case("historical replay does not loosen normal APPEND authority",()=>Rejected(async()=>
             {await store.AppendAndApplyAsync(original,new(1,new(1,1)));},StoreRejection.StaleAuthority));
         }
