@@ -647,6 +647,38 @@ internal static partial class Program
         await RunWeekOneHandoffTestsAsync();
 
         // --- Week Two (Q5 & Q6) Tests ---
+        foreach (var field in new[] { "dataset", "epoch", "index" })
+        {
+            await RunTestAsync($"Q6: rejects reservation snapshot with wrong {field}", async () =>
+            {
+                var store = new FakeBookingStore
+                {
+                    TransformReservationsSnapshot = s => field switch
+                    {
+                        "dataset" => s with { DatasetId = Guid.NewGuid() },
+                        "epoch" => s with { Epoch = s.Epoch + 1 },
+                        _ => s with { AppliedIndex = s.AppliedIndex + 1 }
+                    }
+                };
+                await using var coordinator = new CommandCoordinator(Fixtures.SampleDatasetId, new FakeAuthorityGate(), store, new FakeReplicationPipeline());
+                var rejected = false;
+                try { await coordinator.GetMyReservationsAsync("A"); }
+                catch (InvalidOperationException) { rejected = true; }
+                AssertTrue(rejected);
+            });
+        }
+        await RunTestAsync("Q5: stale authority receipt cannot mask a valid backup ACK", async () =>
+        {
+            var stale = new FakePeerChannel(2)
+            {
+                CustomReceiptFactory = e => new AppliedReceipt(2, e.Epoch + 1, e.Epoch, e.LogIndex, e.EventId, e.EventHash, null)
+            };
+            var valid = new FakePeerChannel(3) { Delay = TimeSpan.FromMilliseconds(20) };
+            var sender = new SynchronousReplicaSender([stale, valid], localNodeId: 1);
+            var outcome = await sender.EnsureOneBackupAsync(Fixtures.CreateSamplePersistedEvent(1), TimeSpan.FromSeconds(1), CancellationToken.None);
+            AssertNotNull(outcome.MatchingReceipt);
+            AssertEqual(3, outcome.MatchingReceipt!.NodeId);
+        });
         await RunTestAsync("Q5: SynchronousReplicaSender reaches Quorum (2/3) when 1 backup ACKs", async () =>
         {
             var peer2 = new FakePeerChannel(2) { ShouldSucceed = true };
@@ -724,19 +756,22 @@ internal static partial class Program
 
             // Query by Quầy A
             var resA = await coordinator.GetMyReservationsAsync("A");
-            AssertEqual(1, resA.Count);
-            AssertEqual("A", resA[0].OwnerId);
-            AssertEqual(1, resA[0].SeatNo);
+            AssertEqual(Fixtures.SampleDatasetId, resA.DatasetId);
+            AssertEqual(gate.CurrentEpoch, resA.Epoch);
+            AssertEqual(store.GetStableIndex(), resA.AppliedIndex);
+            AssertEqual(1, resA.Reservations.Count);
+            AssertEqual("A", resA.Reservations[0].OwnerId);
+            AssertEqual(1, resA.Reservations[0].SeatNo);
 
             // Query by Quầy B
             var resB = await coordinator.GetMyReservationsAsync("B");
-            AssertEqual(1, resB.Count);
-            AssertEqual("B", resB[0].OwnerId);
-            AssertEqual(2, resB[0].SeatNo);
+            AssertEqual(1, resB.Reservations.Count);
+            AssertEqual("B", resB.Reservations[0].OwnerId);
+            AssertEqual(2, resB.Reservations[0].SeatNo);
 
             // Query by Quầy C (no reservations)
             var resC = await coordinator.GetMyReservationsAsync("C");
-            AssertEqual(0, resC.Count);
+            AssertEqual(0, resC.Reservations.Count);
         });
 
         await RunTestAsync("Q6: GetMyReservationsAsync blocks during in-flight mutation until Stable", async () =>
@@ -761,8 +796,8 @@ internal static partial class Program
             await pendingMutation;
             var resList = await readTask;
 
-            AssertEqual(1, resList.Count);
-            AssertEqual(6, resList[0].SeatNo);
+            AssertEqual(1, resList.Reservations.Count);
+            AssertEqual(6, resList.Reservations[0].SeatNo);
         });
 
         await RunTestAsync("Q6: GetMyReservationsAsync throws InvalidOperationException if epoch changes after store read", async () =>

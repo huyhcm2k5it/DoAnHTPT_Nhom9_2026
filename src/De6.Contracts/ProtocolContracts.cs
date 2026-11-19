@@ -52,6 +52,7 @@ public sealed record RecoveryContext(Guid RunId, Guid DatasetId, int SourceNodeI
 
 public sealed record SeatView(int TripId, int SeatNo, SeatStatus Status, Guid? ReservationId, string? OwnerId, long VersionIndex);
 public sealed record StableSnapshot(Guid DatasetId, long Epoch, long AppliedIndex, IReadOnlyList<SeatView> Seats);
+public sealed record StableReservationsSnapshot(Guid DatasetId, long Epoch, long AppliedIndex, IReadOnlyList<ReservationRecord> Reservations);
 
 public sealed record EventPayloadData(
     Guid DatasetId,
