@@ -30,6 +30,8 @@ internal sealed class Checks
         await Run("A3 peer certificate maps to claimed remote NodeId", PeerCertificatePinning);
         await Run("A4 promotion compares audited prefixes and requires physical fence", PromotionPlanRequiresCompatibleFencedNodes);
         await Run("A4 activation requires exact manifest readback from every participant", ManifestReadbackIsAllOrNothing);
+        await Run("A4 activation rejects a manifest for another dataset", ActivationRejectsAnotherDataset);
+        await Run("A6 manifest run resumes after partial persistence and completion", ManifestRunResumes);
         await Run("A6 bootstrap checks all three seeds and rejoin refuses divergent suffix", BootstrapAndRejoinAreFailClosed);
         await Run("A2 Bully chooses the highest eligible candidate", BullyChoosesHighestEligible);
         await Run("A2 coordinator may be highest among currently eligible nodes", BullyAcceptsHighestEligibleCoordinator);
@@ -465,6 +467,86 @@ internal sealed class Checks
         }
         return new VerifiedRecoveryHistory(nodeId, _datasetId, 1, authority, lastIndex,
             head, digest, auditVerified: true, frozen: true, checkpoints);
+    }
+
+    private Task ActivationRejectsAnotherDataset()
+    {
+        var manifest = ClusterRecoveryPlanner.PlanBootstrap(Guid.NewGuid(),
+            new[] { History(1, null, 0), History(2, null, 0), History(3, null, 0) });
+        var other = new ClusterControl(3, Guid.NewGuid());
+        Throws<UnauthorizedAccessException>(() => other.ApplyVerifiedActivation(Authorization(manifest)));
+        Equal(false, other.CanServe);
+        return Task.CompletedTask;
+    }
+
+    private async Task ManifestRunResumes()
+    {
+        var authority = new AcceptedAuthority(1, 3);
+        var fence = new FenceEvidence(3, "fence-fixture", "operator");
+        var verifier = new TestFenceVerifier(true);
+        var first = History(1, authority, 0);
+        var second = History(2, authority, 0);
+        var manifest = ClusterRecoveryPlanner.PlanPromotion(Guid.NewGuid(), 2, first, second, fence, verifier).Manifest;
+        var store1 = new ManifestFixture(1);
+        var store2 = new ManifestFixture(2) { FailPersist = true };
+        var stores = new Dictionary<int, IRecoveryManifestStore> { [1] = store1, [2] = store2 };
+        var candidate = NewControl(2, authority);
+
+        await ThrowsAsync<UnauthorizedAccessException>(() => RecoveryManifestCoordinator.CommitAsync(manifest, stores));
+        True(store1.Manifest is null);
+        await ThrowsAsync<IOException>(() => RecoveryManifestCoordinator.CommitAsync(manifest, stores, fence, verifier));
+        Equal(manifest.RunId, store1.Manifest!.RunId);
+        True(store2.Manifest is null);
+        Equal(false, candidate.CanServe);
+
+        store2.FailPersist = false;
+        store2.FailComplete = true;
+        await ThrowsAsync<IOException>(() => RecoveryManifestCoordinator.CommitAsync(manifest, stores, fence, verifier));
+        True(store1.IsCompleted);
+        Equal(false, store2.IsCompleted);
+        Equal(false, candidate.CanServe);
+
+        store2.FailComplete = false;
+        var authorization = await RecoveryManifestCoordinator.CommitAsync(manifest, stores, fence, verifier);
+        True(store2.IsCompleted);
+        Equal(manifest.RunId, store2.Manifest!.RunId);
+        candidate.ApplyVerifiedActivation(authorization);
+        True(candidate.CanServe);
+    }
+
+    private sealed class ManifestFixture(int nodeId) : IRecoveryManifestStore
+    {
+        public RecoveryManifest? Manifest { get; private set; }
+        public bool IsCompleted { get; private set; }
+        public bool FailPersist { get; set; }
+        public bool FailComplete { get; set; }
+
+        public Task PersistRecoveryManifestAsync(RecoveryManifest manifest, CancellationToken cancellationToken = default)
+        {
+            if (FailPersist) throw new IOException("Injected staging failure.");
+            if (Manifest is not null && !Manifest.HasSameContents(manifest))
+                throw new InvalidDataException("Run changed on retry.");
+            Manifest ??= manifest;
+            return Task.CompletedTask;
+        }
+
+        public Task<RecoveryManifest?> ReadActiveRecoveryManifestAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(IsCompleted ? null : Manifest);
+
+        public Task<RecoveryManifestReadback?> ReadRecoveryManifestAsync(Guid runId, long expectedIndex,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult(Manifest is { } manifest && manifest.RunId == runId && manifest.TargetIndex == expectedIndex
+                ? new RecoveryManifestReadback(nodeId, manifest, manifest.NewAuthority, manifest.SchemaVersion,
+                    manifest.TargetIndex, manifest.HeadHash, manifest.BusinessDigest, true, IsCompleted)
+                : null);
+
+        public Task CompleteRecoveryManifestAsync(RecoveryManifest manifest, CancellationToken cancellationToken = default)
+        {
+            if (FailComplete) throw new IOException("Injected completion failure.");
+            if (!manifest.HasSameContents(Manifest)) throw new InvalidDataException("Run was not staged.");
+            IsCompleted = true;
+            return Task.CompletedTask;
+        }
     }
 
     private static RecoveryActivationAuthorization Authorization(RecoveryManifest manifest)

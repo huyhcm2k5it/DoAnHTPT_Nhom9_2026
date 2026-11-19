@@ -290,8 +290,8 @@ public sealed class ClusterControl : IAuthorityGate, IStoreAccessGate
         ArgumentNullException.ThrowIfNull(authorization);
         var manifest = authorization.Manifest;
         manifest.Validate();
-        if (!manifest.ParticipantNodeIds.Contains(_nodeId))
-            throw new UnauthorizedAccessException("This node is not a participant in the verified recovery manifest.");
+        if (manifest.DatasetId != _datasetId || !manifest.ParticipantNodeIds.Contains(_nodeId))
+            throw new UnauthorizedAccessException("The verified recovery manifest does not authorize this dataset and node.");
 
         lock (_sync)
         {

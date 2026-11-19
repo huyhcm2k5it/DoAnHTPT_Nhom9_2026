@@ -200,13 +200,7 @@ public static class RecoveryManifestReadbackVerifier
         ArgumentNullException.ThrowIfNull(manifest);
         ArgumentNullException.ThrowIfNull(readbacks);
         manifest.Validate();
-        if (manifest.Kind == RecoveryRunKind.Promotion &&
-            (manifest.PreviousAuthority is not { } previous || fenceEvidence is null || fenceVerifier is null ||
-             fenceEvidence.FormerLeaderNodeId != previous.LeaderId ||
-             fenceEvidence.EvidenceReference != manifest.FenceEvidenceReference ||
-             fenceEvidence.OperatorId != manifest.FenceOperatorId ||
-             !fenceVerifier.Verify(fenceEvidence, previous.LeaderId)))
-            throw new UnauthorizedAccessException("Promotion activation requires a freshly verified fence evidence record matching the manifest.");
+        VerifyFence(manifest, fenceEvidence, fenceVerifier);
         var reports = readbacks.ToArray();
         if (reports.Length != manifest.ParticipantNodeIds.Count ||
             !reports.Select(report => report.NodeId).Order().SequenceEqual(manifest.ParticipantNodeIds.Order()))
@@ -222,5 +216,17 @@ public static class RecoveryManifestReadbackVerifier
                 throw new InvalidDataException($"Node S{report.NodeId} has not read back the exact manifest, authority and audited prefix.");
         }
         return new RecoveryActivationAuthorization(manifest);
+    }
+
+    internal static void VerifyFence(RecoveryManifest manifest, FenceEvidence? fenceEvidence,
+        IPhysicalFenceVerifier? fenceVerifier)
+    {
+        if (manifest.Kind == RecoveryRunKind.Promotion &&
+            (manifest.PreviousAuthority is not { } previous || fenceEvidence is null || fenceVerifier is null ||
+             fenceEvidence.FormerLeaderNodeId != previous.LeaderId ||
+             fenceEvidence.EvidenceReference != manifest.FenceEvidenceReference ||
+             fenceEvidence.OperatorId != manifest.FenceOperatorId ||
+             !fenceVerifier.Verify(fenceEvidence, previous.LeaderId)))
+            throw new UnauthorizedAccessException("Promotion requires freshly verified fence evidence matching the manifest.");
     }
 }
