@@ -472,7 +472,7 @@ internal sealed class Checks
     private Task ActivationRejectsAnotherDataset()
     {
         var manifest = ClusterRecoveryPlanner.PlanBootstrap(Guid.NewGuid(),
-            new[] { History(1, null, 0), History(2, null, 0), History(3, null, 0) });
+            new[] { History(1, null, 0, "seed"), History(2, null, 0, "seed"), History(3, null, 0, "seed") });
         var other = new ClusterControl(3, Guid.NewGuid());
         Throws<UnauthorizedAccessException>(() => other.ApplyVerifiedActivation(Authorization(manifest)));
         Equal(false, other.CanServe);
@@ -484,8 +484,8 @@ internal sealed class Checks
         var authority = new AcceptedAuthority(1, 3);
         var fence = new FenceEvidence(3, "fence-fixture", "operator");
         var verifier = new TestFenceVerifier(true);
-        var first = History(1, authority, 0);
-        var second = History(2, authority, 0);
+        var first = History(1, authority, 0, "seed");
+        var second = History(2, authority, 0, "seed");
         var manifest = ClusterRecoveryPlanner.PlanPromotion(Guid.NewGuid(), 2, first, second, fence, verifier).Manifest;
         var store1 = new ManifestFixture(1);
         var store2 = new ManifestFixture(2) { FailPersist = true };

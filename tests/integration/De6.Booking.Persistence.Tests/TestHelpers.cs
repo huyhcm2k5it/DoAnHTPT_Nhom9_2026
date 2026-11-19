@@ -16,7 +16,11 @@ internal sealed class TestGate : IStoreAccessGate
         => Enter(() => !Blocked && !Maintenance && authority == new AcceptedAuthority(1,1) && expectedNextIndex == StableIndex+1);
     public IDisposable EnterAppend(AuthenticatedPeerAuthority peer) => Enter(() => !Blocked);
     public IDisposable EnterReplay(AuthenticatedPeerIdentity authenticatedSource, RecoveryContext context)
-        => Enter(() => authenticatedSource.NodeId == context.SourceNodeId && InstalledRecovery == context);
+        => Enter(() => authenticatedSource.NodeId == context.SourceNodeId &&
+            InstalledRecovery is { } installed &&
+            installed == (context with { BaseHash = installed.BaseHash, HeadHash = installed.HeadHash }) &&
+            installed.BaseHash.Span.SequenceEqual(context.BaseHash.Span) &&
+            installed.HeadHash.Span.SequenceEqual(context.HeadHash.Span));
     public IDisposable EnterSnapshot(long expectedIndex) => Enter(() => !Blocked && !Maintenance && expectedIndex == StableIndex);
     public IDisposable EnterRecoveryInspection() => Enter(() => true);
     public IDisposable EnterMaintenance(long expectedIndex) => Enter(() => Maintenance);
