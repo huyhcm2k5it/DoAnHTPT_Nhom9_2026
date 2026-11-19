@@ -2,12 +2,13 @@ using System.Data;
 using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
+using De6.Contracts;
 using Microsoft.Data.SqlClient;
 
 namespace De6.Booking.Persistence;
 
 public sealed record SqlStorageHealthReport(int NodeId,Guid DatasetId,int SchemaVersion,long LastAppliedIndex,
-    ReadOnlyMemory<byte> HeadHash,int DelayedDurability);
+    ReadOnlyMemory<byte> HeadHash,int DelayedDurability,AcceptedAuthority? AcceptedAuthority);
 
 /// <summary>Read-only local startup evidence. This grants no lease, StableIndex or service authority.</summary>
 public sealed class SqlStorageHealth
@@ -40,7 +41,7 @@ public sealed class SqlStorageHealth
             // Writers lock NodeState first with UPDLOCK, then visit OperationLog. Use the same
             // lock mode/order so this read-only probe cannot hold S(NodeState) while waiting on
             // a writer's log lock as that writer waits to upgrade NodeState to X.
-            "SELECT RowId,NodeId,DatasetId,SchemaVersion,LastAppliedIndex,HeadHash FROM dbo.NodeState WITH(UPDLOCK,HOLDLOCK) WHERE RowId=1"))
+            "SELECT RowId,NodeId,DatasetId,SchemaVersion,LastAppliedIndex,HeadHash,AcceptedEpoch,AcceptedLeader FROM dbo.NodeState WITH(UPDLOCK,HOLDLOCK) WHERE RowId=1"))
         await using(var reader=await command.ExecuteReaderAsync(cancellation))
         {
             if(!await reader.ReadAsync(cancellation)) throw new InvalidDataException("NodeState is missing; probe does not seed databases.");
@@ -48,7 +49,15 @@ public sealed class SqlStorageHealth
                 throw new InvalidDataException("NodeState DatasetId/NodeId/schema does not match configuration.");
             var index=reader.GetInt64(4); var hash=(byte[])reader[5];
             if(index<0 || hash.Length!=32) throw new InvalidDataException("Invalid local applied metadata.");
-            report=new(options.NodeId,options.DatasetId,2,index,hash,Convert.ToInt32(delayed));
+            var epoch=reader.GetInt64(6);
+            int? leader=reader.IsDBNull(7)?null:reader.GetInt32(7);
+            var authority=(epoch,leader) switch
+            {
+                (0,null) => null,
+                (>0,>=1 and <=3) => new AcceptedAuthority(epoch,leader.Value),
+                _ => throw new InvalidDataException("Invalid persisted authority metadata.")
+            };
+            report=new(options.NodeId,options.DatasetId,2,index,hash,Convert.ToInt32(delayed),authority);
             if(await reader.ReadAsync(cancellation)) throw new InvalidDataException("NodeState must have exactly one row.");
         }
         using(var command=SqlSupport.Command(connection,transaction,

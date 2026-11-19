@@ -44,8 +44,10 @@ internal static class RecoveryManifestCases
             manifest.PreviousAuthority, manifest.NewAuthority, manifest.ParticipantNodeIds, manifest.SchemaVersion,
             manifest.TargetIndex, manifest.HeadHash, System.Security.Cryptography.SHA256.HashData("wrong-digest"u8),
             "sql-test-fence-002", "integration-test");
-        var rejectedGate = new TestGate { Maintenance = true };
+        var rejectedGate = new TestGate();
         var rejectedStore = new SqlBookingStore(new(rejectedDb.ConnectionString, Dataset, 2), rejectedGate);
+        await rejectedStore.AppendAndApplyAsync(applied.Event, peer);
+        rejectedGate.Maintenance = true;
         try
         {
             await rejectedStore.PersistRecoveryManifestAsync(incorrectManifest);

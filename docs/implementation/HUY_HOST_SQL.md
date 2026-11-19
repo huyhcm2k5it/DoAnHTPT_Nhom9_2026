@@ -62,3 +62,11 @@ Harness không phải test framework, trả nonzero khi lỗi. Mặc định ki�
 SQL cases kiểm tra seeded DB, sai DatasetId/NodeId, DB thiếu/rỗng, checksum sai, forced delayed durability và LastAppliedIndex vượt log. Một ca đồng thời giữ U-lock trên NodeState xác nhận probe chờ đúng thứ tự khóa trước khi đọc log. Snapshot dữ liệu bảy bảng và migration metadata trước/sau probe xác minh không có sửa/repair. `scripts/test-huy-sql.ps1 -SqlServer <local-instance>` truyền cùng instance vào Persistence và Host harness qua `DE6_TEST_SQL_SERVER`. Trong sandbox không có Windows SSPI, chạy SQL bằng quyền process phù hợp; không tắt encryption để né lỗi SSPI/TLS.
 
 Tạo DB phát triển riêng là bước quản trị bằng [HUY_WEEK1_RUNBOOK](HUY_WEEK1_RUNBOOK.md), không thuộc startup Host. Full oracle/digest/rebuild xem [HUY_WEEK2_PLAN](HUY_WEEK2_PLAN.md). Kết quả component vẫn không thay ma trận nghiệm thu cluster V12.
+
+## Bàn giao receiver và Control
+
+Sau probe thành công, `HostPersistence.Compose` tạo Control từ accepted authority và mốc local của SQL. Nó dùng cùng Control cho SQL store và receiver. Node khởi tạo RECOVERING với StableIndex bằng 0. Probe chỉ đọc schema/metadata của database đã có. Khi DB phát triển còn schema 1, người vận hành thực hiện migration theo [runbook SQL](HUY_WEEK1_RUNBOOK.md).
+
+Điểm nối cho dispatcher peer là `ReplicaReceiver.AppendAsync` và `ReplicaReceiver.ReplayAsync`. Dispatcher chuyển danh tính peer đã xác thực và envelope v1. Replay dùng context đã cài ở node đích. SQL giữ lease qua commit và cập nhật mốc local trước khi nhả lease. Dispatcher chỉ gửi ACK_APPLIED từ receipt khi lời gọi hoàn thành thành công. Nếu gửi ACK thất bại, sender có thể retry cùng event. SQL cuối cùng vẫn có một event và một result.
+
+Tiếp tục nghiệm thu G1/G2 khi nối coordinator và TCP/TLS. `De6.Booking.Domain.IBookingStore` hiện đọc trạng thái và quyết định trước khi gọi Apply. `De6.Contracts.IBookingStore` nhận command và quyết định bên trong transaction. Khi ghép hai đường này, cần chốt một nơi quyết định duy nhất trong transaction để tránh tạo hai reservation/ticket ID khác nhau. G2 cần bằng chứng từ cả primary và backup. Ca H3 hiện kiểm receiver bằng SQL thật với peer fixture và mô phỏng mất ACK tại biên handler.

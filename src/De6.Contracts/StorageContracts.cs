@@ -49,6 +49,12 @@ public interface IStoreAccessGate
     void Block(string reason);
 }
 
+/// <summary>Updates the local applied cursor while SQL still holds the access lease.</summary>
+public interface ILocalApplyProgress
+{
+    void RecordLocalAppliedIndex(long index);
+}
+
 public sealed record DurableResultView(Guid RequestId,string OwnerId,string CommandHash,long LogIndex,ReadOnlyMemory<byte> ResultPayload);
 public sealed record StorageProjection(IReadOnlyList<SeatView> Seats,IReadOnlyList<ReservationData> Reservations,
     IReadOnlyList<TicketData> Tickets,IReadOnlyList<DurableResultView> Results);

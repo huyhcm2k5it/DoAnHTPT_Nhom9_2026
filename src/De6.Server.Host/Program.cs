@@ -2,6 +2,7 @@ using De6.Cluster.Control;
 using De6.Contracts;
 using De6.Booking.Persistence;
 using Microsoft.Data.SqlClient;
+using De6.Server.Host;
 
 if (args.Length is < 2 or > 3 || args[0] != "--config" || (args.Length == 3 && args[2] is not ("--check" or "--check-sql")))
 {
@@ -30,8 +31,11 @@ if(options.Sql is not null)
 {
     try
     {
-        var health=await new SqlStorageHealth().ProbeAsync(SqlPersistenceComposition.CreateStoreOptions(options),stop.Token);
-        Console.WriteLine($"SQL local probe passed: SchemaVersion={health.SchemaVersion} LastAppliedIndex={health.LastAppliedIndex} DelayedDurability={health.DelayedDurability}. No StableIndex or authority was granted.");
+        var storeOptions=SqlPersistenceComposition.CreateStoreOptions(options);
+        var health=await new SqlStorageHealth().ProbeAsync(storeOptions,stop.Token);
+        var persistence=HostPersistence.Compose(storeOptions, health);
+        var local=persistence.Control.Snapshot;
+        Console.WriteLine($"SQL local probe passed: SchemaVersion={health.SchemaVersion} LastAppliedIndex={local.LastAppliedIndex} DelayedDurability={health.DelayedDurability}. No StableIndex or authority was granted.");
     }
     catch(OperationCanceledException) when(stop.IsCancellationRequested) { return 130; }
     catch(Exception exception) when(exception is SqlException or InvalidDataException or InvalidOperationException or ArgumentException or IOException)

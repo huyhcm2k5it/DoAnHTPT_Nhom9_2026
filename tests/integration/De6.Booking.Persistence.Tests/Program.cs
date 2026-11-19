@@ -1,6 +1,7 @@
 using De6.Booking.Persistence;
 using Microsoft.Data.SqlClient;
 using De6.Contracts;
+using De6.Cluster.Replication;
 
 var server = Environment.GetEnvironmentVariable("DE6_TEST_SQL_SERVER") ?? @"lpc:.\SQLEXPRESS";
 var run = Guid.NewGuid().ToString("N");
@@ -55,11 +56,19 @@ try
     await using var backupDb=await TestDatabase.Create(server,2);
     var backupGate=new TestGate();
     var backup=new SqlBookingStore(new(backupDb.ConnectionString,dataset,2),backupGate);
-    var receipt=await backup.AppendAndApplyAsync(applied.Event,new(1,new(1,1)));
+    var receiver=new ReplicaReceiver(dataset,2,backup);
+    var peer=TestPeerIdentityFactory.Create(2,1);
+    var receipt=await receiver.AppendAsync(1,peer,1,applied.Event);
     SqlTest.Require(receipt.NodeId==2 && receipt.LogIndex==1 && receipt.EventId==applied.Event.EventId,"Wrong backup receipt");
-    await backup.AppendAndApplyAsync(applied.Event,new(1,new(1,1)));
+    // Drop the first receipt at the transport boundary and resend exactly the same event.
+    var retriedReceipt=await receiver.AppendAsync(1,peer,1,applied.Event);
+    SqlTest.Require(retriedReceipt.NodeId==receipt.NodeId &&
+        retriedReceipt.AuthorityEpoch==receipt.AuthorityEpoch && retriedReceipt.EventEpoch==receipt.EventEpoch &&
+        retriedReceipt.LogIndex==receipt.LogIndex && retriedReceipt.EventId==receipt.EventId &&
+        retriedReceipt.EventHash.Span.SequenceEqual(receipt.EventHash.Span),"Retry modified the durable receipt");
     SqlTest.Require(Convert.ToInt32(await SqlTest.Scalar(backupDb.ConnectionString,"SELECT COUNT(*) FROM dbo.OperationLog"))==1,"Backup duplicated Apply");
-    Console.WriteLine("PASS H3 backup commits event then ACKs; duplicate does not Apply again");
+    SqlTest.Require(Convert.ToInt32(await SqlTest.Scalar(backupDb.ConnectionString,"SELECT COUNT(*) FROM dbo.RequestResults"))==1,"Backup duplicated results");
+    Console.WriteLine("PASS H3 receiver reissues durable receipt after lost ACK without applying twice");
     gate.StableIndex=1; // Test-controlled publication, not proof of real coordinator/replication.
     var snapshot=await store.ReadStableSnapshotAsync(1);
     SqlTest.Require(snapshot.AppliedIndex==1 && snapshot.Seats.Count==10 && snapshot.Seats.Single(s=>s.SeatNo==1).Status==SeatStatus.Held,"Wrong snapshot");
@@ -76,7 +85,8 @@ try
     var context=new RecoveryContext(Guid.NewGuid(),dataset,1,3,2,2,0,Convert.FromHexString(first.PreviousHash),1,applied.Event.EventHash);
     replayGate.InstalledRecovery=context;
     var replaySource=TestPeerIdentityFactory.Create(3,1);
-    var replayReceipt=await replayStore.ApplyReplayEntryAsync(applied.Event,replaySource,context);
+    var replayReceiver=new ReplicaReceiver(dataset,3,replayStore);
+    var replayReceipt=await replayReceiver.ReplayAsync(1,replaySource,context,applied.Event);
     SqlTest.Require(replayReceipt.AuthorityEpoch==2 && replayReceipt.EventEpoch==1 && replayReceipt.RecoveryRunId==context.RunId,"Replay changed historical authority");
     SqlTest.Require(Convert.ToInt64(await SqlTest.Scalar(replayDb.ConnectionString,"SELECT AcceptedEpoch FROM dbo.NodeState"))==0,"Replay granted authority");
     SqlTest.Require(Convert.ToInt32(await SqlTest.Scalar(replayDb.ConnectionString,"SELECT NodeId FROM dbo.NodeState"))==3,"Replay copied NodeId");
