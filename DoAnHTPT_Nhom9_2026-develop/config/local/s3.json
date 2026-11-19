@@ -1,0 +1,30 @@
+{
+  "nodeId": 3,
+  "datasetId": "124a4f06-4ac1-4c12-8b27-202600000009",
+  "nodes": [
+    {
+      "nodeId": 1,
+      "host": "127.0.0.1",
+      "clientPort": 9001,
+      "peerPort": 9101
+    },
+    {
+      "nodeId": 2,
+      "host": "127.0.0.1",
+      "clientPort": 9002,
+      "peerPort": 9102
+    },
+    {
+      "nodeId": 3,
+      "host": "127.0.0.1",
+      "clientPort": 9003,
+      "peerPort": 9103
+    }
+  ],
+  "dataDirectory": "data/servers/s3",
+  "sql": {
+    "server": "lpc:.\\SQLEXPRESS",
+    "database": "De6_S3",
+    "connectTimeoutSeconds": 5
+  }
+}

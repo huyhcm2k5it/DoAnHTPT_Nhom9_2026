@@ -1,0 +1,25 @@
+{
+  "status": "PASS",
+  "model": "bounded educational design model; not C#/SQL tests",
+  "domain": "2 seats, 2 active owners; 7 representative histories; one in-flight command",
+  "exploration": "all atomic Apply/ACK/response snapshots generated for each candidate command; every one-node failure",
+  "fault_schedules_checked": 2886,
+  "duplicate_or_conflict_cases": 26,
+  "publication_gate_checks": 962,
+  "discarded_tail_rejoin_cases": 74,
+  "negative_controls_detected": {
+    "final_before_replica_loses_acknowledged_result": true,
+    "candidate_only_recovery_loses_newer_survivor_result": true,
+    "read_before_stable_exposes_discarded_tail": true,
+    "ack_before_sql_commit_loses_acknowledged_result": true
+  },
+  "outside_model": [
+    "real SQL, disk durability and transaction isolation",
+    "TCP/TLS/JSON and process races",
+    "Bully network timing",
+    "physical fencing and admin activation manifest",
+    "multiple faults before repair",
+    "arbitrary histories/unbounded proofs"
+  ],
+  "spec_sha256": "f77b1780398cf92c221013169674a27a52015d431a87f99d41fce2a1a7eef153"
+}
