@@ -14,7 +14,9 @@ Giải thích sender chuyển đúng event đã tạo, backup trả receipt kh�
 
 ## Đức An về recovery và fencing
 
-Giải thích Bully chỉ chọn candidate, quyền writer cần fencing và kiểm tra manifest/readback. Recovery so hai participant ở cùng mốc K, dùng RecoveryContext để replay lịch sử mà không cấp quyền phục vụ cho node phục hồi. Liên hệ Cluster.Control, T18, T20–T25, T28 và giới hạn khi thiếu participant hoặc prefix conflict.
+Bully chọn ứng viên theo ID. Sau khi xác minh primary cũ đã bị cách ly, `ClusterRecoveryPlanner` so hash và digest của hai lịch sử đã freeze tại từng index chung. Ví dụ, S2 thắng bầu nhưng chỉ có log đến K−1, còn S1 có log đến K. Nếu hai lịch sử khớp đến K−1, S1 là nguồn replay và S2 vẫn là ứng viên. `RecoveryContext` giới hạn replay theo RunId, peer nguồn đã xác thực và mốc đích. S2 giữ cổng nghiệp vụ đóng trong thời gian này.
+
+Khi cả hai node đã khớp đến K, `RecoveryManifestCoordinator` ghi và đọc lại cùng manifest trên cả hai trước khi cấp quyền kích hoạt. Nếu lần ghi thứ hai lỗi, thử lại bằng chính RunId và nội dung cũ. Nếu chỉ còn một participant, hoặc hash hay digest lệch tại cùng index, giữ cổng đóng. Node quay lại với đuôi xung đột cần archive và kế hoạch repair trước khi admit. Các trường hợp trên tương ứng T18, T20–T26 và T28. Xem [trace và giới hạn kiểm chứng của phần Đức An](03_duc_an_bully.md).
 
 ## Trace cần hoàn thiện
 
