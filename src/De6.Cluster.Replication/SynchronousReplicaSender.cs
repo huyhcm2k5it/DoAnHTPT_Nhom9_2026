@@ -74,6 +74,7 @@ public sealed class SynchronousReplicaSender : IReplicaSender
         if (receipt is null) return false;
         if (expectedTargetNodeId is < 1 or > 3 || expectedTargetNodeId == localNodeId) return false;
         if (receipt.NodeId != expectedTargetNodeId) return false;
+        if (receipt.AuthorityEpoch != persistedEvent.Epoch) return false;
         if (receipt.EventEpoch != persistedEvent.Epoch) return false;
         if (receipt.LogIndex != persistedEvent.LogIndex) return false;
         if (receipt.EventId != persistedEvent.EventId) return false;

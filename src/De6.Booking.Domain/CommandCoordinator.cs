@@ -143,13 +143,12 @@ public sealed class CommandCoordinator : ICommandCoordinator
         finally { _mutationLock.Release(); }
     }
 
-    public async Task<IReadOnlyList<ReservationRecord>> GetMyReservationsAsync(string authenticatedOwnerId, CancellationToken cancellationToken = default)
+    public async Task<StableReservationsSnapshot> GetMyReservationsAsync(string authenticatedOwnerId, CancellationToken cancellationToken = default)
     {
         if (!_authorityGate.CanServe)
             throw new InvalidOperationException("Cluster is not ready to serve authoritative reads.");
 
-        if (string.IsNullOrWhiteSpace(authenticatedOwnerId))
-            return Array.Empty<ReservationRecord>();
+        ArgumentException.ThrowIfNullOrWhiteSpace(authenticatedOwnerId);
 
         await _mutationLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
@@ -158,12 +157,15 @@ public sealed class CommandCoordinator : ICommandCoordinator
                 throw new InvalidOperationException("Cluster is not ready to serve authoritative reads.");
 
             var epoch = _authorityGate.CurrentEpoch;
-            var reservations = await _store.GetReservationsByOwnerAsync(authenticatedOwnerId, cancellationToken).ConfigureAwait(false);
+            var stableIndex = _store.GetStableIndex();
+            var snapshot = await _store.ReadReservationsSnapshotAsync(authenticatedOwnerId, stableIndex, cancellationToken).ConfigureAwait(false);
 
             if (!_authorityGate.CanServe || _authorityGate.CurrentEpoch != epoch)
                 throw new InvalidOperationException("Cluster is not ready to serve authoritative reads.");
 
-            return reservations;
+            if (snapshot.DatasetId != _datasetId || snapshot.Epoch != epoch || snapshot.AppliedIndex != stableIndex)
+                throw new InvalidOperationException("Reservation snapshot does not match the authoritative stable state.");
+            return snapshot;
         }
         finally
         {

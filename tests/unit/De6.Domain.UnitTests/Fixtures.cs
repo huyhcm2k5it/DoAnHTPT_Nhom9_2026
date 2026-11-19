@@ -99,6 +99,16 @@ public sealed class FakeBookingStore : De6.Booking.Domain.IBookingStore
     }
 
     public Func<Task>? BeforeGetReservationsAsync { get; set; }
+    public Func<StableReservationsSnapshot, StableReservationsSnapshot>? TransformReservationsSnapshot { get; set; }
+
+    public async ValueTask<StableReservationsSnapshot> ReadReservationsSnapshotAsync(string ownerId, long expectedIndex, CancellationToken cancellationToken = default)
+    {
+        var rows = await GetReservationsByOwnerAsync(ownerId, cancellationToken);
+        if (AppliedEvents.Count != expectedIndex)
+            throw new InvalidOperationException("Snapshot index mismatch.");
+        var snapshot = new StableReservationsSnapshot(Fixtures.SampleDatasetId, AppliedEvents.LastOrDefault()?.Epoch ?? 1, AppliedEvents.Count, rows);
+        return TransformReservationsSnapshot?.Invoke(snapshot) ?? snapshot;
+    }
 
     public async ValueTask<IReadOnlyList<ReservationRecord>> GetReservationsByOwnerAsync(string ownerId, CancellationToken cancellationToken = default)
     {

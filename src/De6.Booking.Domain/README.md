@@ -1,5 +1,21 @@
 # De6.Booking.Domain
 
+## Reservation snapshot handoff
+
+`GetMyReservationsAsync` returns `StableReservationsSnapshot` with DatasetId, Epoch,
+AppliedIndex and Reservations. The domain store adapter must implement
+`ReadReservationsSnapshotAsync(ownerId, expectedIndex)` using one transaction for rows
+and metadata, rejecting an index mismatch. The coordinator checks that metadata against
+its dataset, epoch and StableIndex before publishing the response.
+
+The SQL component already exposes `ReadMyReservationsAsync(owner, expectedIndex)`;
+the Host/domain adapter still needs to bridge that API and obtain its metadata under
+the same SQL transaction and authority lease. The fake store tests verify the domain
+contract only; they do not establish SQL atomicity or two-database acceptance.
+
+The sender now rejects a mismatching AuthorityEpoch before choosing a receipt, so
+a stale receipt from one backup cannot hide a valid receipt from another backup.
+
 Owner: Gia Quân.
 
 `BookingDecisionEngine`, `CommandIdentityValidator` and `CommandCoordinator` implement the week 1 in-memory domain path. The coordinator serializes mutations, blocks uncertain local commits, checks replica receipts and StableIndex before FINAL, and gates `GetSeats`/`GetResult`. Unit tests use fake storage, authority and replication. SQL transaction atomicity, real gate/replica wiring and three-node acceptance still depend on the other modules. V12 sections 6-10, 16; T02-T12, T29, T32.
