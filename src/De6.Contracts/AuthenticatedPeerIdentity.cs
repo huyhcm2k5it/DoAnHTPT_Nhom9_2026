@@ -58,6 +58,15 @@ public sealed class PeerCertificateAuthenticator
         return new AuthenticatedPeerIdentity(mappedNodeId, hash);
     }
 
+    public AuthenticatedPeerIdentity Authenticate(X509Certificate2 certificate, DateTimeOffset now)
+    {
+        ArgumentNullException.ThrowIfNull(certificate);
+        var hash = Convert.ToHexString(certificate.GetCertHash(HashAlgorithmName.SHA256));
+        if (!_nodeByCertificateHash.TryGetValue(hash, out var nodeId))
+            throw new UnauthorizedAccessException("The certificate does not belong to a configured peer.");
+        return Authenticate(certificate, nodeId, now);
+    }
+
     private static string NormalizePin(string pin, string parameterName)
     {
         if (pin is null) throw new ArgumentNullException(parameterName);

@@ -12,20 +12,14 @@ public interface IAuthorityGate
 
 public interface IBookingStore : IRequestResultLookup
 {
-    ValueTask<SeatView> GetSeatAsync(int seatNo, CancellationToken cancellationToken = default);
-    ValueTask<IReadOnlyList<SeatView>> GetAllSeatsAsync(CancellationToken cancellationToken = default);
-    ValueTask<ReservationRecord?> GetReservationAsync(Guid reservationId, CancellationToken cancellationToken = default);
-    ValueTask<TicketRecord?> GetTicketByReservationAsync(Guid reservationId, CancellationToken cancellationToken = default);
-    ValueTask<IReadOnlyList<ReservationRecord>> GetReservationsByOwnerAsync(string ownerId, CancellationToken cancellationToken = default);
+    ValueTask<StableSnapshot> ReadSeatsSnapshotAsync(long expectedIndex, CancellationToken cancellationToken = default);
     // Implementations must read rows and metadata in one transaction and reject an index mismatch.
     ValueTask<StableReservationsSnapshot> ReadReservationsSnapshotAsync(string ownerId, long expectedIndex, CancellationToken cancellationToken = default);
 
-    Task<PersistedEvent> ApplyLocalAsync(
+    Task<StoreApplyResult> DecideAndApplyAsync(
         AuthenticatedCommand command,
-        BookingDecision decision,
-        long epoch,
-        int writerId,
-        DateTime utcNow,
+        AcceptedAuthority authority,
+        long expectedNextIndex,
         CancellationToken cancellationToken = default);
 
     Task MarkStableAsync(long logIndex, CancellationToken cancellationToken = default);

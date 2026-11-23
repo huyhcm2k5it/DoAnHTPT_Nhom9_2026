@@ -8,10 +8,10 @@ AppliedIndex and Reservations. The domain store adapter must implement
 and metadata, rejecting an index mismatch. The coordinator checks that metadata against
 its dataset, epoch and StableIndex before publishing the response.
 
-The SQL component already exposes `ReadMyReservationsAsync(owner, expectedIndex)`;
-the Host/domain adapter still needs to bridge that API and obtain its metadata under
-the same SQL transaction and authority lease. The fake store tests verify the domain
-contract only; they do not establish SQL atomicity or two-database acceptance.
+The Host adapter maps SQL seat and reservation snapshots under the same transaction
+and authority lease used to check the index. Request lookup uses the stable SQL
+prefix. The coordinator publishes the result from the committed event after a
+matching backup receipt and advances the Control's in-memory StableIndex.
 
 The sender now rejects a mismatching AuthorityEpoch before choosing a receipt, so
 a stale receipt from one backup cannot hide a valid receipt from another backup.

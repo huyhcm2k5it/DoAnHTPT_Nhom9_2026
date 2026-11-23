@@ -38,7 +38,10 @@ public sealed record TicketRecord(Guid TicketId, int TripId, int SeatNo, Guid Re
 
 public sealed record BookingDecision(DecisionKind Kind, SeatView? SeatAfter, ReservationRecord? ReservationAfter, TicketRecord? TicketCreated, BusinessResult Result);
 
-public sealed record CommandReply(TransportStatus Status, BusinessResult? Result, string? ErrorCode = null);
+public sealed record CommandReply(TransportStatus Status, BusinessResult? Result, string? ErrorCode = null)
+{
+    public long? AppliedIndex { get; init; }
+}
 
 public sealed record PersistedEvent(Guid DatasetId, long LogIndex, long Epoch, int WriterId, Guid EventId,
     ReadOnlyMemory<byte> PayloadBytes, ReadOnlyMemory<byte> EventHash, ReadOnlyMemory<byte> ResultPayload);
