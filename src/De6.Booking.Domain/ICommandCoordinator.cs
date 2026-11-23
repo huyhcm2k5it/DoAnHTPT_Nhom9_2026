@@ -25,6 +25,13 @@ public interface IBookingStore : IRequestResultLookup
     Task MarkStableAsync(long logIndex, CancellationToken cancellationToken = default);
 }
 
+public interface IPendingReplicationGate
+{
+    bool TryPauseForReplication(PersistedEvent entry);
+    bool IsPendingReplication(PersistedEvent entry);
+    bool TryResumeAfterReplication(PersistedEvent entry, AppliedReceipt receipt);
+}
+
 public interface ICommandCoordinator : IAsyncDisposable
 {
     // Cancellation stops waiting for the reply; it cannot abandon an operation after LocalApplied.

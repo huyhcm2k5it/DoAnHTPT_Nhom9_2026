@@ -21,11 +21,11 @@ internal static class Program
         }
         if (args.Contains("--check"))
         {
-            Console.WriteLine($"C{options.ClientId} Owner={options.OwnerId}: configuration valid; connection/pending NOT IMPLEMENTED.");
+            Console.WriteLine($"C{options.ClientId} Owner={options.OwnerId}: configuration valid.");
             return 0;
         }
         ApplicationConfiguration.Initialize();
-        Application.Run(new TemplateForm(options));
+        Application.Run(new BookingForm(options));
         return 0;
     }
 }

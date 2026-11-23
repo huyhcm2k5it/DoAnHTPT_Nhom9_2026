@@ -4,6 +4,11 @@ using De6.Contracts;
 using De6.Cluster.Replication;
 
 var server = Environment.GetEnvironmentVariable("DE6_TEST_SQL_SERVER") ?? @"lpc:.\SQLEXPRESS";
+if (args is ["--standalone"])
+{
+    await StandaloneBootCase.Run(server);
+    return 0;
+}
 var run = Guid.NewGuid().ToString("N");
 var database = "De6_HuyW1_Test_" + run;
 var connection = new SqlConnectionStringBuilder
@@ -98,6 +103,7 @@ try
     await MaintenanceCases.Run(server);
     await RecoveryManifestCases.Run(server);
     await CoordinatorSqlCase.Run(server);
+    await StandaloneBootCase.Run(server);
     return 0;
 }
 catch (Exception exception)

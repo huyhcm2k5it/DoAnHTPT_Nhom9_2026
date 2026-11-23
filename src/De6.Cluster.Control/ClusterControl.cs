@@ -23,7 +23,7 @@ public sealed record ClusterControlSnapshot(int NodeId, Guid DatasetId, ServingR
 /// Owns local serving authority and the SQL access gate. A process always starts closed.
 /// Only recovery code in this assembly can apply a verified activation.
 /// </summary>
-public sealed class ClusterControl : IAuthorityGate, IStoreAccessGate, ILocalApplyProgress
+public sealed class ClusterControl : IAuthorityGate, IStoreAccessGate, ILocalApplyProgress, IPendingReplicationGate
 {
     private readonly object _sync = new();
     private readonly int _nodeId;
@@ -42,6 +42,7 @@ public sealed class ClusterControl : IAuthorityGate, IStoreAccessGate, ILocalApp
     private TaskCompletionSource? _leasesDrained;
     private RecoveryContext? _installedRecoveryContext;
     private DateTimeOffset _recoveryContextExpiresAt;
+    private PersistedEvent? _pendingReplication;
 
     public ClusterControl(int nodeId, Guid datasetId, AcceptedAuthority? persistedAuthority = null,
         long persistedLastAppliedIndex = 0, TimeProvider? timeProvider = null)
@@ -137,6 +138,7 @@ public sealed class ClusterControl : IAuthorityGate, IStoreAccessGate, ILocalApp
             }
 
             _role = ServingRole.Maintenance;
+            _pendingReplication = null;
             _installedRecoveryContext = null;
             if (_activeLeases == 0) return;
             _leasesDrained ??= new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -279,11 +281,50 @@ public sealed class ClusterControl : IAuthorityGate, IStoreAccessGate, ILocalApp
         lock (_sync)
         {
             _role = ServingRole.BlockedUncertain;
+            _pendingReplication = null;
             _installedRecoveryContext = null;
         }
     }
 
     public void BlockUncertain() => Block("UNCERTAIN_OPERATION");
+
+    public bool TryPauseForReplication(PersistedEvent entry)
+    {
+        lock (_sync)
+        {
+            if (_role != ServingRole.PrimaryReady || entry.DatasetId != _datasetId ||
+                _acceptedAuthority != new AcceptedAuthority(entry.Epoch, entry.WriterId) ||
+                entry.WriterId != _nodeId || entry.LogIndex != _lastAppliedIndex ||
+                entry.LogIndex != _stableIndex + 1 || _activeLeases != 0)
+                return false;
+            _pendingReplication = entry;
+            _role = ServingRole.BlockedUncertain;
+            return true;
+        }
+    }
+
+    public bool IsPendingReplication(PersistedEvent entry)
+    {
+        lock (_sync) return _role == ServingRole.BlockedUncertain && ReferenceEquals(_pendingReplication, entry);
+    }
+
+    public bool TryResumeAfterReplication(PersistedEvent entry, AppliedReceipt receipt)
+    {
+        lock (_sync)
+        {
+            if (!IsPendingReplication(entry) || _activeLeases != 0 ||
+                receipt.NodeId is < 1 or > 3 || receipt.NodeId == _nodeId ||
+                receipt.AuthorityEpoch != entry.Epoch || receipt.EventEpoch != entry.Epoch ||
+                receipt.LogIndex != entry.LogIndex || receipt.EventId != entry.EventId ||
+                receipt.RecoveryRunId is not null ||
+                !CryptographicOperations.FixedTimeEquals(receipt.EventHash.Span, entry.EventHash.Span))
+                return false;
+            _stableIndex = entry.LogIndex;
+            _pendingReplication = null;
+            _role = ServingRole.PrimaryReady;
+            return true;
+        }
+    }
 
     public void ApplyVerifiedActivation(RecoveryActivationAuthorization authorization)
     {

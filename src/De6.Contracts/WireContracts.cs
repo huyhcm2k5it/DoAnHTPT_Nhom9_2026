@@ -50,4 +50,7 @@ public static class WireMessageTypes
     public const string Cancel = "CANCEL";
     public const string AppendApply = "APPEND_APPLY";
     public const string AckApplied = "ACK_APPLIED";
+    public const string CheckBackup = "CHECK_BACKUP";
+    public const string Heartbeat = "HEARTBEAT";
+    public const string ElectionNotice = "ELECTION_NOTICE";
 }

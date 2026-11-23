@@ -12,6 +12,7 @@ public sealed class CommandCoordinator : ICommandCoordinator
     private readonly IAuthorityGate _authorityGate;
     private readonly IBookingStore _store;
     private readonly IReplicaSender _replication;
+    private readonly Func<AcceptedAuthority, long, CancellationToken, Task<bool>>? _backupPreflight;
     private readonly Channel<MutationWorkItem> _queue;
     private readonly CancellationTokenSource _cts = new();
     private readonly Task _workerTask;
@@ -27,12 +28,14 @@ public sealed class CommandCoordinator : ICommandCoordinator
         IAuthorityGate authorityGate,
         IBookingStore store,
         IReplicaSender replication,
-        int queueCapacity = 256)
+        int queueCapacity = 256,
+        Func<AcceptedAuthority, long, CancellationToken, Task<bool>>? backupPreflight = null)
     {
         _datasetId = datasetId;
         _authorityGate = authorityGate;
         _store = store;
         _replication = replication;
+        _backupPreflight = backupPreflight;
 
         var options = new BoundedChannelOptions(queueCapacity)
         {
@@ -262,8 +265,16 @@ public sealed class CommandCoordinator : ICommandCoordinator
             }
 
             var nextIndex = _store.GetStableIndex() + 1;
+            var authority = new AcceptedAuthority(epoch, writerId);
+            if (_backupPreflight is not null &&
+                (!await _backupPreflight(authority, nextIndex - 1, _cts.Token).ConfigureAwait(false) ||
+                    !HasAuthority(epoch, writerId)))
+            {
+                item.Completion.TrySetResult(new CommandReply(TransportStatus.ClusterNotReady, null));
+                return;
+            }
             var applied = await _store.DecideAndApplyAsync(
-                cmd, new AcceptedAuthority(epoch, writerId), nextIndex, _cts.Token).ConfigureAwait(false);
+                cmd, authority, nextIndex, _cts.Token).ConfigureAwait(false);
             var persistedEvent = applied.Event;
             var result = CanonicalProtocol.DeserializeBusinessResult(persistedEvent.ResultPayload.Span);
 
@@ -283,12 +294,9 @@ public sealed class CommandCoordinator : ICommandCoordinator
                 var outcome = await _replication.EnsureOneBackupAsync(persistedEvent, TimeSpan.FromSeconds(5), _cts.Token).ConfigureAwait(false);
                 receipt = outcome.MatchingReceipt;
             }
-            catch (Exception)
+            catch (Exception) when (!_cts.IsCancellationRequested)
             {
-                // Timeout / Network loss on replication -> UNKNOWN
-                _authorityGate.BlockUncertain();
-                item.Completion.TrySetResult(new CommandReply(TransportStatus.Unknown, null));
-                return;
+                receipt = null;
             }
 
             if (receipt is null || receipt.NodeId is < 1 or > 3 || receipt.NodeId == writerId ||
@@ -296,8 +304,7 @@ public sealed class CommandCoordinator : ICommandCoordinator
                 receipt.LogIndex != persistedEvent.LogIndex || receipt.EventId != persistedEvent.EventId ||
                 receipt.RecoveryRunId is not null || !receipt.EventHash.Span.SequenceEqual(persistedEvent.EventHash.Span))
             {
-                _authorityGate.BlockUncertain();
-                item.Completion.TrySetResult(new CommandReply(TransportStatus.Unknown, null));
+                await ReconcileMissingReceiptAsync(item, persistedEvent).ConfigureAwait(false);
                 return;
             }
 
@@ -336,6 +343,27 @@ public sealed class CommandCoordinator : ICommandCoordinator
 
     private bool HasAuthority(long epoch, int writerId) =>
         _authorityGate.CanServe && _authorityGate.CurrentEpoch == epoch && _authorityGate.LeaderId == writerId;
+
+    private async Task ReconcileMissingReceiptAsync(MutationWorkItem item, PersistedEvent entry)
+    {
+        var gate = _authorityGate as IPendingReplicationGate;
+        var pending = gate?.TryPauseForReplication(entry) == true;
+        if (!pending && HasAuthority(entry.Epoch, entry.WriterId)) _authorityGate.BlockUncertain();
+        item.Completion.TrySetResult(new CommandReply(TransportStatus.Unknown, null));
+        if (!pending || gate is null) return;
+
+        // The caller already got UNKNOWN. Re-send only the exact committed event.
+        // If this process shuts down or authority changes, use normal recovery.
+        for (var attempt = 0; attempt < 3 && gate.IsPendingReplication(entry); attempt++)
+        {
+            await Task.Delay(TimeSpan.FromSeconds(1), _cts.Token).ConfigureAwait(false);
+            if (!gate.IsPendingReplication(entry)) return;
+            var response = await _replication.EnsureOneBackupAsync(entry, TimeSpan.FromSeconds(5), _cts.Token)
+                .ConfigureAwait(false);
+            if (response.MatchingReceipt is { } receipt && gate.TryResumeAfterReplication(entry, receipt))
+                return;
+        }
+    }
 
     public async ValueTask DisposeAsync()
     {

@@ -51,7 +51,7 @@ public sealed class ClientCommandExecutor
         }
         catch (Exception exception) when (exception is ClientTransportUncertainException or StaleClientResponseException or ClientRouteException)
         {
-            ClientResultResolution resolution = await ResolvePendingAsync(identity.RequestId, CancellationToken.None).ConfigureAwait(false);
+            ClientResultResolution resolution = await ResolvePendingAsync(identity.RequestId, cancellationToken).ConfigureAwait(false);
             if (resolution.IsFinal && resolution.Response is not null)
                 return resolution.Response;
             throw;
