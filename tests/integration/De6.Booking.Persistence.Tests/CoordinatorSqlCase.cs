@@ -43,9 +43,17 @@ internal static class CoordinatorSqlCase
         var command = new AuthenticatedCommand(new(dataset, idempotencyKey, "A",
             BookingCanonical.CommandHash(dataset, "A", payload), payload));
 
-        var reply = await coordinator.SubmitAsync(command, CancellationToken.None);
-        SqlTest.Require(reply.Status == TransportStatus.Final && reply.Result?.Code == ResultCodes.OkHeld,
-            "HOLD did not reach FINAL through the Host coordinator and SQL receiver.");
+        var firstReply = await coordinator.SubmitAsync(command, CancellationToken.None);
+        SqlTest.Require(firstReply.Status == TransportStatus.Unknown && !primary.Control.CanServe &&
+            primary.Control.Snapshot.StableIndex == 0 && backup.Control.Snapshot.LastAppliedIndex == 1,
+            "A dropped durable ACK must return UNKNOWN and close the gate.");
+        using var settle = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        while (!primary.Control.CanServe) await Task.Delay(25, settle.Token);
+        var reply = await coordinator.SubmitAsync(command, settle.Token);
+        SqlTest.Require(reply.Status == TransportStatus.Final && reply.Result?.Code == ResultCodes.OkHeld &&
+            Convert.ToInt32(await SqlTest.Scalar(db2.ConnectionString, "SELECT COUNT(*) FROM dbo.OperationLog")) == 1,
+            "Reconciliation must reissue durable ACK without adding another log entry.");
+        Console.WriteLine("PASS dropped durable ACK returns UNKNOWN then the same event restores Stable without a duplicate");
         var p = await primary.Store.ReadStableResultAsync(idempotencyKey, "A", 1);
         SqlTest.Require(p is not null && primary.Control.Snapshot.StableIndex == 1 &&
             backup.Control.Snapshot.LastAppliedIndex == 1 &&
@@ -139,10 +147,14 @@ internal static class CoordinatorSqlCase
     private sealed class LocalPeer(ReplicaReceiver receiver) : IPeerChannel
     {
         private readonly AuthenticatedPeerIdentity _primary = TestPeerIdentityFactory.Create(2, 3);
+        private int _attempts;
         public int TargetNodeId => 2;
 
         public async Task<AppliedReceipt?> SendAppendApplyAsync(PersistedEvent persistedEvent, TimeSpan timeout,
-            CancellationToken cancellationToken) =>
-            await receiver.AppendAsync(1, _primary, persistedEvent.Epoch, persistedEvent, cancellationToken);
+            CancellationToken cancellationToken)
+        {
+            var receipt = await receiver.AppendAsync(1, _primary, persistedEvent.Epoch, persistedEvent, cancellationToken);
+            return Interlocked.Increment(ref _attempts) == 1 ? null : receipt;
+        }
     }
 }

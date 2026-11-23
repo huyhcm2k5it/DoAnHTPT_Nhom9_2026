@@ -4,9 +4,12 @@ using De6.Booking.Persistence;
 using Microsoft.Data.SqlClient;
 using De6.Server.Host;
 
-if (args.Length is < 2 or > 3 || args[0] != "--config" || (args.Length == 3 && args[2] is not ("--check" or "--check-sql")))
+if (args.Length is < 2 or > 4 || args[0] != "--config" ||
+    (args.Length == 3 && args[2] is not ("--check" or "--check-sql")) ||
+    (args.Length == 4 && (args[2] is not ("--prepare-local-bootstrap" or "--activate-local-bootstrap") ||
+        !Guid.TryParse(args[3], out _))))
 {
-    Console.Error.WriteLine("Usage: De6.Server.Host --config <path> [--check|--check-sql]");
+    Console.Error.WriteLine("Usage: De6.Server.Host --config <path> [--check|--check-sql|--prepare-local-bootstrap <run-id>|--activate-local-bootstrap <run-id>]");
     return 2;
 }
 ServerOptions options;
@@ -30,6 +33,15 @@ if(options.Sql is not null)
 {
     try
     {
+        if (args.Length == 4 && args[2] == "--prepare-local-bootstrap")
+        {
+            using var first = LocalBootstrap.LockNode(args[1], 1);
+            using var second = LocalBootstrap.LockNode(args[1], 2);
+            using var third = LocalBootstrap.LockNode(args[1], 3);
+            await LocalBootstrap.RunAsync(args[1], Guid.Parse(args[3]), null, stop.Token);
+            Console.WriteLine($"Bootstrap {args[3]} prepared and verified on all three SQL databases.");
+            return 0;
+        }
         var storeOptions=SqlPersistenceComposition.CreateStoreOptions(options);
         var health=await new SqlStorageHealth().ProbeAsync(storeOptions,stop.Token);
         var persistence=HostPersistence.Compose(storeOptions, health);
@@ -37,20 +49,27 @@ if(options.Sql is not null)
         Console.WriteLine($"SQL local probe passed: SchemaVersion={health.SchemaVersion} LastAppliedIndex={local.LastAppliedIndex} DelayedDurability={health.DelayedDurability}. No StableIndex or authority was granted.");
         if (!args.Contains("--check-sql") && Environment.GetEnvironmentVariable("DE6_HOST_TLS_CONFIG") is { Length: > 0 } tlsPath)
         {
+            using var nodeLock = LocalBootstrap.LockNode(args[1], options.NodeId);
+            if (args.Length == 4)
+                await LocalBootstrap.RunAsync(args[1], Guid.Parse(args[3]), persistence, stop.Token);
+            Console.WriteLine($"S{options.NodeId} role before listening: {persistence.Control.Snapshot.Role}.");
             await HostTlsRuntime.RunAsync(options, persistence, HostTlsOptions.Load(tlsPath), storeOptions, stop.Token);
             return 0;
         }
+        if (args.Length == 4)
+            throw new InvalidDataException("Set DE6_HOST_TLS_CONFIG before activating a node.");
     }
     catch(OperationCanceledException) when(stop.IsCancellationRequested) { return 130; }
     catch(Exception exception) when(exception is SqlException or InvalidDataException or InvalidOperationException or
         ArgumentException or IOException or System.Text.Json.JsonException or FormatException or
-        System.Security.Cryptography.CryptographicException or System.Net.Sockets.SocketException)
+        System.Security.Cryptography.CryptographicException or System.Net.Sockets.SocketException or
+        StoreRejectedException or StorageUncertainException)
     {
         Console.Error.WriteLine($"Host startup failed: {exception.Message}");
         return 1;
     }
 }
-else if(args.Contains("--check-sql"))
+else if(args.Contains("--check-sql") || args.Length == 4)
 {
     Console.Error.WriteLine("SQL configuration is required for --check-sql; node remains RECOVERING/ServingEnabled=false.");
     return 2;

@@ -11,10 +11,40 @@ for each counter A/B/C, and use certificates whose names match the configured
 endpoint addresses. The peer port requires a certificate mapped to a remote node.
 
 With this config, normal startup probes SQL and starts separate client and peer
-TLS listeners. `--check` and `--check-sql` remain read-only checks. The production
-Host starts in RECOVERING. The administrative election and activation workflow
-still needs wiring. The SQL integration test activates temporary nodes through
-the verified manifest path before using the TLS listeners.
+TLS listeners. `--check` and `--check-sql` remain read-only checks.
+
+### Initial local cluster
+
+Use three seeded databases from `config/local/s1.json` through `s3.json`, all at
+index zero, with distinct PFX files and one shared set of account records. From
+the repo root, prepare a manifest while the three Hosts are stopped:
+
+```powershell
+$run = [guid]::NewGuid().ToString('D')
+dotnet run --project src/De6.Server.Host -- --config config/local/s1.json --prepare-local-bootstrap $run
+```
+
+Record the RunId. In each of three terminals, set `DE6_HOST_TLS_CONFIG` to that
+node's TLS JSON and provision its PFX password through the environment. Start S1,
+S2, then S3, waiting for each TLS listener to open:
+
+```powershell
+dotnet run --project src/De6.Server.Host --no-build -- --config config/local/s1.json --activate-local-bootstrap <run-id>
+```
+
+Use the matching `s2.json` and `s3.json` for the other two commands. Every activation
+reads back the completed seed manifest from all three databases. S3 becomes the
+primary and S1/S2 are backups. Use the same RunId when resuming interrupted manifest
+preparation. Nonzero log indexes require a recovery workflow. The CLI bootstrap is
+limited to local loopback addresses. Hosts exchange authenticated heartbeats and
+run Bully when a backup suspects the current primary. Candidate selection does
+not grant serving rights. Operator fencing, promotion and rejoin after an
+existing history still require runtime recovery orchestration.
+
+On the client, set `DE6_CLIENT_TLS_PINS` to the path of a JSON map from all three
+NodeIds to their SHA-256 certificate fingerprints. Run `scripts/start-client.ps1`
+with ClientId 1, 2 or 3 and sign in as A, B or C respectively. Each client stores
+pending commands under its configured data directory.
 
 Owner: Huy (tích hợp cả nhóm).
 

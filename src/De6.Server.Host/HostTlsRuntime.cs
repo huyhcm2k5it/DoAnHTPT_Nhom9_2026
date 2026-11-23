@@ -42,12 +42,17 @@ internal static class HostTlsRuntime
         };
         var authenticator = new PeerCertificateAuthenticator(options.NodeId, pins);
         var peers = remote.Select(n => new TlsPeer(n, options, tls.PeerPins[n.NodeId], certificate)).ToArray();
-        await using var coordinator = persistence.CreateCoordinator(peers);
+        await using var coordinator = persistence.CreateCoordinator(peers, HasEligibleBackupAsync);
         using var stop = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var sqlHealthy = 1;
         var clientDispatcher = new ClientRequestDispatcher(options.DatasetId, options.NodeId, persistence.Control,
             coordinator, new ClientSessionManager(tls.Accounts), () => Volatile.Read(ref sqlHealthy) == 1);
-        var peerDispatcher = new PeerRequestDispatcher(options.NodeId, options.DatasetId, persistence.Receiver);
+        var election = new HostElectionWorker(persistence.Control, options.Nodes, async (id, payload, token) =>
+        {
+            await peers.Single(peer => peer.TargetNodeId == id).ExchangeAsync(payload, token).ConfigureAwait(false);
+        });
+        var peerDispatcher = new PeerRequestDispatcher(options.NodeId, options.DatasetId, persistence.Receiver,
+            () => persistence.Control.Snapshot, election.HandleAsync);
         var address = IPAddress.TryParse(local.Host, out var ip)
             ? ip : (await Dns.GetHostAddressesAsync(local.Host, AddressFamily.InterNetwork, stop.Token)).First();
         using var clientListener = new TcpListener(address, local.ClientPort);
@@ -59,13 +64,26 @@ internal static class HostTlsRuntime
         var endpoints = new[]
         {
             ListenAsync(clientListener, false, stop.Token), ListenAsync(peerListener, true, stop.Token),
-            MonitorSqlAsync(stop.Token)
+            MonitorSqlAsync(stop.Token), election.RunAsync(stop.Token)
         };
         try { await await Task.WhenAny(endpoints).ConfigureAwait(false); }
         finally
         {
             stop.Cancel();
             await Task.WhenAll(endpoints).ConfigureAwait(false);
+        }
+
+        async Task<bool> HasEligibleBackupAsync(AcceptedAuthority authority, long stableIndex, CancellationToken token)
+        {
+            var probes = peers.Select(peer => peer.IsReadyAsync(authority.Epoch, stableIndex, token)).ToList();
+            while (probes.Count > 0)
+            {
+                var completed = await Task.WhenAny(probes).ConfigureAwait(false);
+                if (await completed.ConfigureAwait(false)) return true;
+                probes.Remove(completed);
+            }
+            token.ThrowIfCancellationRequested();
+            return false;
         }
 
         async Task ListenAsync(TcpListener listener, bool peerPort, CancellationToken token)
@@ -125,7 +143,8 @@ internal static class HostTlsRuntime
                     }
                 }
                 catch (Exception ex) when (ex is IOException or AuthenticationException or SocketException or
-                    OperationCanceledException or JsonException or InvalidOperationException or FormatException or ArgumentException)
+                    OperationCanceledException or JsonException or InvalidOperationException or FormatException or ArgumentException or
+                    UnauthorizedAccessException or KeyNotFoundException or InvalidDataException)
                 {
                     // A malformed frame, failed handshake, or disconnected peer ends only this connection.
                 }
@@ -158,6 +177,37 @@ internal static class HostTlsRuntime
     private sealed class TlsPeer(NodeEndpoint endpoint, ServerOptions local, string pin, X509Certificate2 certificate) : IPeerChannel
     {
         public int TargetNodeId => endpoint.NodeId;
+
+        public async Task<bool> IsReadyAsync(long epoch, long stableIndex, CancellationToken cancellationToken)
+        {
+            try
+            {
+                var response = await ExchangeAsync(new { type = WireMessageTypes.CheckBackup, epoch, appliedIndex = stableIndex },
+                    cancellationToken).ConfigureAwait(false);
+                return response.Payload.GetProperty("status").GetString() == "OK";
+            }
+            catch (Exception ex) when (ex is IOException or SocketException or AuthenticationException or
+                OperationCanceledException or JsonException or KeyNotFoundException or InvalidOperationException or InvalidDataException)
+            {
+                return false;
+            }
+        }
+
+        public async Task<ClientEnvelope> ExchangeAsync(object payload, CancellationToken cancellationToken)
+        {
+            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            deadline.CancelAfter(TimeSpan.FromSeconds(1));
+            await using var tls = await TlsClientConnector.ConnectAsync(endpoint.Host, endpoint.PeerPort, pin,
+                deadline.Token, certificate).ConfigureAwait(false);
+            var request = new ClientEnvelope(1, local.DatasetId, Guid.NewGuid(), Guid.NewGuid(), local.NodeId,
+                JsonSerializer.SerializeToElement(payload));
+            await tls.Channel.WriteFrameAsync(WireCodec.SerializeEnvelope(request), deadline.Token).ConfigureAwait(false);
+            var response = WireCodec.DeserializeEnvelope(await tls.Channel.ReadFrameAsync(deadline.Token).ConfigureAwait(false));
+            if (response.DatasetId != local.DatasetId || response.SenderId != TargetNodeId ||
+                response.CorrelationId != request.CorrelationId)
+                throw new InvalidDataException("Peer reply does not match the request.");
+            return response;
+        }
 
         public async Task<AppliedReceipt?> SendAppendApplyAsync(PersistedEvent persistedEvent, TimeSpan timeout,
             CancellationToken cancellationToken)

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using De6.Booking.Persistence;
+using De6.Cluster.Control;
 using De6.Cluster.Replication;
 using De6.Contracts;
 using De6.Transport.Tcp;
@@ -17,8 +18,12 @@ public sealed class PeerRequestDispatcher
     private readonly int _localNodeId;
     private readonly Guid _datasetId;
     private readonly ReplicaReceiver _receiver;
+    private readonly Func<ClusterControlSnapshot>? _snapshot;
+    private readonly Func<string, ClientEnvelope, AuthenticatedPeerIdentity, CancellationToken, Task<string?>>? _dispatchControl;
 
-    public PeerRequestDispatcher(int localNodeId, Guid datasetId, ReplicaReceiver receiver)
+    public PeerRequestDispatcher(int localNodeId, Guid datasetId, ReplicaReceiver receiver,
+        Func<ClusterControlSnapshot>? snapshot = null,
+        Func<string, ClientEnvelope, AuthenticatedPeerIdentity, CancellationToken, Task<string?>>? dispatchControl = null)
     {
         if (localNodeId is < 1 or > 3)
             throw new ArgumentOutOfRangeException(nameof(localNodeId), "Local NodeId must be 1..3.");
@@ -28,6 +33,8 @@ public sealed class PeerRequestDispatcher
         _localNodeId = localNodeId;
         _datasetId = datasetId;
         _receiver = receiver ?? throw new ArgumentNullException(nameof(receiver));
+        _snapshot = snapshot;
+        _dispatchControl = dispatchControl;
     }
 
     public async Task HandleConnectionAsync(
@@ -91,10 +98,12 @@ public sealed class PeerRequestDispatcher
         CancellationToken cancellationToken)
     {
         var payload = request.Payload;
+        if (payload.ValueKind != JsonValueKind.Object)
+            return "{\"status\":\"REJECTED\",\"error\":\"INVALID_PAYLOAD\"}";
         string type = "";
         if (payload.TryGetProperty("type", out var tProp) || payload.TryGetProperty("action", out tProp))
         {
-            type = tProp.GetString()?.ToUpperInvariant() ?? "";
+            type = tProp.ValueKind == JsonValueKind.String ? tProp.GetString()?.ToUpperInvariant() ?? "" : "";
         }
 
         // Rejection of Client RPCs on peer port per V12
@@ -102,6 +111,18 @@ public sealed class PeerRequestDispatcher
             or WireMessageTypes.GetResult or WireMessageTypes.Hold or WireMessageTypes.Confirm or WireMessageTypes.Cancel)
         {
             return "{\"status\":\"REJECTED\",\"error\":\"CLIENT_RPC_NOT_ALLOWED_ON_PEER_PORT\"}";
+        }
+
+        if (type == WireMessageTypes.CheckBackup)
+        {
+            if (_snapshot?.Invoke() is { Role: ServingRole.BackupReady } snapshot &&
+                payload.TryGetProperty("epoch", out var epoch) && epoch.ValueKind == JsonValueKind.Number &&
+                epoch.TryGetInt64(out var expectedEpoch) &&
+                payload.TryGetProperty("appliedIndex", out var index) && index.ValueKind == JsonValueKind.Number &&
+                index.TryGetInt64(out var expectedIndex) && snapshot.LastAppliedIndex == expectedIndex &&
+                snapshot.AcceptedAuthority == new AcceptedAuthority(expectedEpoch, peerIdentity.NodeId))
+                return "{\"status\":\"OK\"}";
+            return "{\"status\":\"CLUSTER_NOT_READY\"}";
         }
 
         if (type == WireMessageTypes.AppendApply)
@@ -145,6 +166,9 @@ public sealed class PeerRequestDispatcher
             }
         }
 
+        if (_dispatchControl is not null &&
+            await _dispatchControl(type, request, peerIdentity, cancellationToken).ConfigureAwait(false) is { } reply)
+            return reply;
         return "{\"status\":\"REJECTED\",\"error\":\"UNKNOWN_PEER_MESSAGE_TYPE\"}";
     }
 
