@@ -17,7 +17,7 @@ public sealed record AuthenticatedPeerAuthority(int SenderNodeId, AcceptedAuthor
 public sealed record StoreApplyResult(PersistedEvent Event, bool ExistingResult);
 public sealed record StoredResultSnapshot(long AppliedIndex, Guid RequestId, string OwnerId,
     long LogIndex, ReadOnlyMemory<byte> ResultPayload);
-public sealed record ReservationsSnapshot(long AppliedIndex, IReadOnlyList<ReservationData> Reservations);
+public sealed record ReservationsSnapshot(Guid DatasetId, long Epoch, long AppliedIndex, IReadOnlyList<ReservationData> Reservations);
 
 /// <summary>Pure synchronous decision; runs on SQL state within the primary transaction. No I/O.</summary>
 public interface IBookingDecisionEngine

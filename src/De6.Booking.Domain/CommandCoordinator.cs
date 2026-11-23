@@ -15,7 +15,6 @@ public sealed class CommandCoordinator : ICommandCoordinator
     private readonly Channel<MutationWorkItem> _queue;
     private readonly CancellationTokenSource _cts = new();
     private readonly Task _workerTask;
-    private long _nextLogIndex;
 
     // Mutex ensuring snapshot reads don't see uncommitted/unstable in-flight mutations
     private readonly SemaphoreSlim _mutationLock = new(1, 1);
@@ -28,14 +27,12 @@ public sealed class CommandCoordinator : ICommandCoordinator
         IAuthorityGate authorityGate,
         IBookingStore store,
         IReplicaSender replication,
-        long initialLogIndex = 0,
         int queueCapacity = 256)
     {
         _datasetId = datasetId;
         _authorityGate = authorityGate;
         _store = store;
         _replication = replication;
-        _nextLogIndex = initialLogIndex + 1;
 
         var options = new BoundedChannelOptions(queueCapacity)
         {
@@ -101,11 +98,13 @@ public sealed class CommandCoordinator : ICommandCoordinator
             if (!_authorityGate.CanServe)
                 throw new InvalidOperationException("Cluster is not ready to serve authoritative reads.");
             var epoch = _authorityGate.CurrentEpoch;
-            var seats = await _store.GetAllSeatsAsync(cancellationToken).ConfigureAwait(false);
             var stableIndex = _store.GetStableIndex();
+            var snapshot = await _store.ReadSeatsSnapshotAsync(stableIndex, cancellationToken).ConfigureAwait(false);
             if (!_authorityGate.CanServe || _authorityGate.CurrentEpoch != epoch)
                 throw new InvalidOperationException("Cluster is not ready to serve authoritative reads.");
-            return new StableSnapshot(_datasetId, epoch, stableIndex, seats);
+            if (snapshot.DatasetId != _datasetId || snapshot.Epoch != epoch || snapshot.AppliedIndex != stableIndex)
+                throw new InvalidOperationException("Seat snapshot does not match the authoritative stable state.");
+            return snapshot;
         }
         finally
         {
@@ -123,22 +122,22 @@ public sealed class CommandCoordinator : ICommandCoordinator
         {
         if (!_authorityGate.CanServe)
             return new CommandReply(TransportStatus.ClusterNotReady, null);
-        var epoch = _authorityGate.CurrentEpoch;
-        var existing = await _store.FindByRequestIdAsync(requestId, cancellationToken).ConfigureAwait(false);
-        if (!_authorityGate.CanServe || _authorityGate.CurrentEpoch != epoch)
-            return new CommandReply(TransportStatus.ClusterNotReady, null);
-        if (existing is null)
-            return new CommandReply(TransportStatus.NotFound, null);
+            var epoch = _authorityGate.CurrentEpoch;
+            var writerId = _authorityGate.LeaderId;
+            var stableIndex = _store.GetStableIndex();
+            var existing = await _store.FindByRequestIdAsync(requestId, cancellationToken).ConfigureAwait(false);
+            if (!HasAuthority(epoch, writerId) || _store.GetStableIndex() != stableIndex)
+                return new CommandReply(TransportStatus.ClusterNotReady, null);
+            if (existing is null)
+                return new CommandReply(TransportStatus.NotFound, null) { AppliedIndex = stableIndex };
 
-        if (!string.Equals(existing.OwnerId, ownerId, StringComparison.Ordinal))
-        {
-            return new CommandReply(TransportStatus.Rejected, null);
-        }
+            if (!string.Equals(existing.OwnerId, ownerId, StringComparison.Ordinal))
+                return new CommandReply(TransportStatus.Rejected, null);
 
-        if (existing.IsStable && existing.LogIndex <= _store.GetStableIndex())
-            return new CommandReply(TransportStatus.Final, existing.Result);
+            if (existing.IsStable && existing.LogIndex <= stableIndex)
+                return new CommandReply(TransportStatus.Final, existing.Result) { AppliedIndex = stableIndex };
 
-        return new CommandReply(TransportStatus.Unknown, null);
+            return new CommandReply(TransportStatus.Unknown, null);
         }
         finally { _mutationLock.Release(); }
     }
@@ -222,12 +221,21 @@ public sealed class CommandCoordinator : ICommandCoordinator
                 return;
             }
 
+            var epoch = _authorityGate.CurrentEpoch;
+            var writerId = _authorityGate.LeaderId;
+
             // 1. Identity & Dedup validation
             var valResult = await CommandIdentityValidator.ValidateAndCheckDedupAsync(
                 cmd,
                 _datasetId,
                 _store,
                 _cts.Token).ConfigureAwait(false);
+
+            if (!HasAuthority(epoch, writerId))
+            {
+                item.Completion.TrySetResult(new CommandReply(TransportStatus.ClusterNotReady, null));
+                return;
+            }
 
             if (valResult.Status == ValidationStatus.RejectedBeforeEvent)
             {
@@ -253,59 +261,15 @@ public sealed class CommandCoordinator : ICommandCoordinator
                 return;
             }
 
-            // 2. Load current state for decision engine
-            var seat = await _store.GetSeatAsync(cmd.Identity.Command.SeatNo, _cts.Token).ConfigureAwait(false);
-            ReservationRecord? reservation = null;
-            TicketRecord? ticket = null;
+            var nextIndex = _store.GetStableIndex() + 1;
+            var applied = await _store.DecideAndApplyAsync(
+                cmd, new AcceptedAuthority(epoch, writerId), nextIndex, _cts.Token).ConfigureAwait(false);
+            var persistedEvent = applied.Event;
+            var result = CanonicalProtocol.DeserializeBusinessResult(persistedEvent.ResultPayload.Span);
 
-            if (cmd.Identity.Command.ReservationId.HasValue)
-            {
-                reservation = await _store.GetReservationAsync(cmd.Identity.Command.ReservationId.Value, _cts.Token).ConfigureAwait(false);
-                if (reservation is not null)
-                {
-                    ticket = await _store.GetTicketByReservationAsync(reservation.ReservationId, _cts.Token).ConfigureAwait(false);
-                }
-            }
-
-            var nextIndex = _nextLogIndex;
-            var epoch = _authorityGate.CurrentEpoch;
-            var writerId = _authorityGate.LeaderId;
-            var utcNow = DateTime.UtcNow;
-
-            var decision = BookingDecisionEngine.Decide(
-                cmd.Identity.Command,
-                cmd.Identity.OwnerId,
-                seat,
-                reservation,
-                ticket,
-                nextIndex,
-                epoch,
-                writerId,
-                utcNow);
-
-            // 3. Apply Local (Atomic SQL transaction -> LocalApplied)
-            PersistedEvent persistedEvent;
-            try
-            {
-                persistedEvent = await _store.ApplyLocalAsync(
-                    cmd,
-                    decision,
-                    epoch,
-                    writerId,
-                    utcNow,
-                    _cts.Token).ConfigureAwait(false);
-            }
-            catch (Exception)
-            {
-                _authorityGate.BlockUncertain();
-                item.Completion.TrySetResult(new CommandReply(TransportStatus.Unknown, null));
-                return;
-            }
-            _nextLogIndex = persistedEvent.LogIndex + 1;
-
-            if (persistedEvent.DatasetId != _datasetId || persistedEvent.LogIndex != nextIndex ||
-                persistedEvent.Epoch != epoch || persistedEvent.WriterId != writerId ||
-                !persistedEvent.ResultPayload.Span.SequenceEqual(CanonicalProtocol.SerializeBusinessResult(decision.Result)))
+            if (applied.ExistingResult || persistedEvent.DatasetId != _datasetId ||
+                persistedEvent.LogIndex != nextIndex || persistedEvent.Epoch != epoch || persistedEvent.WriterId != writerId ||
+                !HasAuthority(epoch, writerId))
             {
                 _authorityGate.BlockUncertain();
                 item.Completion.TrySetResult(new CommandReply(TransportStatus.Unknown, null));
@@ -361,7 +325,7 @@ public sealed class CommandCoordinator : ICommandCoordinator
                 item.Completion.TrySetResult(new CommandReply(TransportStatus.Unknown, null));
                 return;
             }
-            item.Completion.TrySetResult(new CommandReply(TransportStatus.Final, decision.Result));
+            item.Completion.TrySetResult(new CommandReply(TransportStatus.Final, result));
         }
         finally
         {
@@ -369,6 +333,9 @@ public sealed class CommandCoordinator : ICommandCoordinator
             _mutationLock.Release();
         }
     }
+
+    private bool HasAuthority(long epoch, int writerId) =>
+        _authorityGate.CanServe && _authorityGate.CurrentEpoch == epoch && _authorityGate.LeaderId == writerId;
 
     public async ValueTask DisposeAsync()
     {

@@ -97,6 +97,7 @@ try
     await ReviewRegressionCases.Run(server,applied.Event);
     await MaintenanceCases.Run(server);
     await RecoveryManifestCases.Run(server);
+    await CoordinatorSqlCase.Run(server);
     return 0;
 }
 catch (Exception exception)

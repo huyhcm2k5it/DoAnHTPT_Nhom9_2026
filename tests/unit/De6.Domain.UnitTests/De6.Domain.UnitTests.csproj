@@ -10,5 +10,9 @@
     <ProjectReference Include="..\..\..\src\De6.Contracts\De6.Contracts.csproj" />
     <ProjectReference Include="..\..\..\src\De6.Booking.Domain\De6.Booking.Domain.csproj" />
     <ProjectReference Include="..\..\..\src\De6.Cluster.Control\De6.Cluster.Control.csproj" />
+    <ProjectReference Include="..\..\..\src\De6.Client.Sdk\De6.Client.Sdk.csproj" />
+    <ProjectReference Include="..\..\..\src\De6.Server.Host\De6.Server.Host.csproj" />
+    <ProjectReference Include="..\..\..\src\De6.Transport.Tcp\De6.Transport.Tcp.csproj" />
+    <ProjectReference Include="..\..\..\src\De6.Cluster.Replication\De6.Cluster.Replication.csproj" />
   </ItemGroup>
 </Project>

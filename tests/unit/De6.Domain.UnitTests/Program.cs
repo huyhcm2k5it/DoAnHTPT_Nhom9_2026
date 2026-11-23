@@ -1,6 +1,10 @@
+using System.Text.Json;
 using De6.Booking.Domain;
+using De6.Cluster.Control;
 using De6.Cluster.Replication;
 using De6.Contracts;
+using De6.Server.Host;
+using De6.Transport.Tcp;
 
 namespace De6.Domain.UnitTests;
 
@@ -646,6 +650,18 @@ internal static partial class Program
 
         await RunWeekOneHandoffTestsAsync();
 
+        await RunTestAsync("Stable retry cannot return FINAL after freeze during lookup", async () =>
+        {
+            var gate = new FakeAuthorityGate();
+            var store = new FakeBookingStore();
+            await using var coordinator = new CommandCoordinator(Fixtures.SampleDatasetId, gate, store, new FakeReplicationPipeline());
+            var command = Fixtures.CreateHoldCommand(Fixtures.SampleDatasetId, Guid.NewGuid(), "A", 1);
+            AssertEqual(TransportStatus.Final, (await coordinator.SubmitAsync(command, CancellationToken.None)).Status);
+            store.BeforeFindAsync = () => { gate.CanServe = false; return Task.CompletedTask; };
+            AssertEqual(TransportStatus.ClusterNotReady, (await coordinator.SubmitAsync(command, CancellationToken.None)).Status);
+            AssertEqual(1, store.AppliedEvents.Count);
+        });
+
         // --- Week Two (Q5 & Q6) Tests ---
         foreach (var field in new[] { "dataset", "epoch", "index" })
         {
@@ -886,6 +902,422 @@ internal static partial class Program
             AssertEqual(0, primaryStore.GetStableIndex());
         });
 
+        // --- G0 Wire Contract & Serialization Tests (Gia Quân chủ trì) ---
+        RunTest("G0: WireCodec serializes and deserializes ClientEnvelope preserving all fields", () =>
+        {
+            var dataset = Guid.NewGuid();
+            var msgId = Guid.NewGuid();
+            var corrId = Guid.NewGuid();
+            var reqId = Guid.NewGuid();
+            var payload = JsonDocument.Parse("{\"action\":\"HOLD\",\"tripId\":1,\"seatNo\":5}").RootElement.Clone();
+            var env = new ClientEnvelope(1, dataset, msgId, corrId, 2, payload, reqId);
+
+            var bytes = WireCodec.SerializeEnvelope(env);
+            var roundTrip = WireCodec.DeserializeEnvelope(bytes);
+
+            AssertEqual(1, roundTrip.ProtocolVersion);
+            AssertEqual(dataset, roundTrip.DatasetId);
+            AssertEqual(msgId, roundTrip.MessageId);
+            AssertEqual(corrId, roundTrip.CorrelationId);
+            AssertEqual(2, roundTrip.SenderId);
+            AssertEqual(reqId, roundTrip.RequestId);
+            AssertEqual("HOLD", roundTrip.Payload.GetProperty("action").GetString());
+            AssertEqual(5, roundTrip.Payload.GetProperty("seatNo").GetInt32());
+        });
+
+        RunTest("G0: WireCodec rejects ProtocolVersion != 1 and empty DatasetId", () =>
+        {
+            var payload = JsonDocument.Parse("{}").RootElement.Clone();
+            var invalidVersion = new ClientEnvelope(2, Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), 0, payload);
+            bool versionFailed = false;
+            try { WireCodec.SerializeEnvelope(invalidVersion); }
+            catch (InvalidDataException) { versionFailed = true; }
+            AssertTrue(versionFailed);
+
+            var emptyDataset = new ClientEnvelope(1, Guid.Empty, Guid.NewGuid(), Guid.NewGuid(), 0, payload);
+            bool datasetFailed = false;
+            try { WireCodec.SerializeEnvelope(emptyDataset); }
+            catch (InvalidDataException) { datasetFailed = true; }
+            AssertTrue(datasetFailed);
+        });
+
+        RunTest("G0: WireCodec preserves exact PersistedEvent bytes and SHA-256 hash through round trip", () =>
+        {
+            var sample = Fixtures.CreateSamplePersistedEvent(1);
+            var encoded = WireCodec.EncodePersistedEvent(sample);
+            var decoded = WireCodec.DecodePersistedEvent(encoded);
+
+            AssertEqual(sample.DatasetId, decoded.DatasetId);
+            AssertEqual(sample.LogIndex, decoded.LogIndex);
+            AssertEqual(sample.Epoch, decoded.Epoch);
+            AssertEqual(sample.WriterId, decoded.WriterId);
+            AssertEqual(sample.EventId, decoded.EventId);
+            AssertTrue(sample.PayloadBytes.Span.SequenceEqual(decoded.PayloadBytes.Span));
+            AssertTrue(sample.EventHash.Span.SequenceEqual(decoded.EventHash.Span));
+            AssertTrue(sample.ResultPayload.Span.SequenceEqual(decoded.ResultPayload.Span));
+        });
+
+        RunTest("G0: ClientLoginProtocol creates valid login frame and parses login response", () =>
+        {
+            var proto = new De6.Client.Sdk.ClientLoginProtocol();
+            var dataset = Guid.NewGuid();
+            var msgId = Guid.NewGuid();
+            var corrId = Guid.NewGuid();
+            var req = new De6.Client.Sdk.ClientLoginRequest("A", "pass123", dataset);
+
+            var frame = proto.CreateLoginRequest(req, msgId, corrId);
+            var env = WireCodec.DeserializeEnvelope(frame);
+
+            AssertEqual(1, env.ProtocolVersion);
+            AssertEqual(dataset, env.DatasetId);
+            AssertEqual(corrId, env.CorrelationId);
+            AssertEqual(WireMessageTypes.Login, env.Payload.GetProperty("type").GetString());
+            AssertEqual("A", env.Payload.GetProperty("username").GetString());
+
+            // Simulate server login response
+            var token = Guid.NewGuid().ToString("N");
+            var expires = DateTimeOffset.UtcNow.AddHours(8);
+            var respJson = $"{{\"status\":\"OK\",\"sessionToken\":\"{token}\",\"ownerId\":\"A\",\"expiresAt\":\"{expires:O}\"}}";
+            var respDoc = JsonDocument.Parse(respJson);
+            var respEnv = new ClientEnvelope(1, dataset, Guid.NewGuid(), corrId, 1, respDoc.RootElement.Clone());
+            var respFrame = WireCodec.SerializeEnvelope(respEnv);
+
+            var session = proto.ParseLoginResponse(respFrame, dataset, corrId);
+            AssertEqual("A", session.OwnerId);
+            AssertEqual(token, session.AccessToken);
+            AssertEqual(dataset, session.DatasetId);
+            AssertTrue(!session.IsExpired());
+        });
+
+        RunTest("G0: ClientLoginProtocol rejects correlation mismatch, dataset mismatch, or expired session", () =>
+        {
+            var proto = new De6.Client.Sdk.ClientLoginProtocol();
+            var dataset = Guid.NewGuid();
+            var corrId = Guid.NewGuid();
+            var expires = DateTimeOffset.UtcNow.AddHours(1);
+            var respJson = $"{{\"status\":\"OK\",\"sessionToken\":\"token1\",\"ownerId\":\"A\",\"expiresAt\":\"{expires:O}\"}}";
+            var respDoc = JsonDocument.Parse(respJson);
+
+            // Wrong dataset
+            var wrongDsEnv = new ClientEnvelope(1, Guid.NewGuid(), Guid.NewGuid(), corrId, 1, respDoc.RootElement.Clone());
+            bool dsFailed = false;
+            try { proto.ParseLoginResponse(WireCodec.SerializeEnvelope(wrongDsEnv), dataset, corrId); }
+            catch (InvalidDataException) { dsFailed = true; }
+            AssertTrue(dsFailed);
+
+            // Wrong correlation
+            var wrongCorrEnv = new ClientEnvelope(1, dataset, Guid.NewGuid(), Guid.NewGuid(), 1, respDoc.RootElement.Clone());
+            bool corrFailed = false;
+            try { proto.ParseLoginResponse(WireCodec.SerializeEnvelope(wrongCorrEnv), dataset, corrId); }
+            catch (InvalidDataException) { corrFailed = true; }
+            AssertTrue(corrFailed);
+        });
+
+        RunTest("G0: ClientNodeWireProtocol creates cluster status request and parses cluster status response", () =>
+        {
+            var proto = new De6.Client.Sdk.ClientNodeWireProtocol();
+            var dataset = Guid.NewGuid();
+            var msgId = Guid.NewGuid();
+            var corrId = Guid.NewGuid();
+
+            var reqFrame = proto.CreateGetClusterStatusRequest(dataset, msgId, corrId, clientId: 1);
+            var env = WireCodec.DeserializeEnvelope(reqFrame);
+            AssertEqual(WireMessageTypes.GetClusterStatus, env.Payload.GetProperty("type").GetString());
+            AssertEqual(1, env.SenderId);
+
+            // Simulate response
+            var respJson = "{\"nodeId\":2,\"role\":\"PRIMARY_READY\",\"epoch\":3,\"acceptedLeaderId\":2,\"sqlHealthy\":true,\"localAppliedIndex\":10,\"stableIndex\":10,\"followerLag\":0}";
+            var respDoc = JsonDocument.Parse(respJson);
+            var respEnv = new ClientEnvelope(1, dataset, Guid.NewGuid(), corrId, 2, respDoc.RootElement.Clone());
+            var respFrame = WireCodec.SerializeEnvelope(respEnv);
+
+            var status = proto.ParseGetClusterStatusResponse(respFrame, dataset, expectedNodeId: 2, expectedCorrelationId: corrId);
+            AssertEqual(2, status.NodeId);
+            AssertEqual(dataset, status.DatasetId);
+            AssertEqual(ClientNodeRole.PrimaryReady, status.Role);
+            AssertEqual(3, status.Epoch);
+            AssertEqual(2, status.AcceptedLeaderId);
+            AssertTrue(status.SqlHealthy);
+            AssertEqual(10, status.LocalAppliedIndex);
+            AssertEqual(10, status.StableIndex);
+            AssertEqual(0, status.FollowerLag);
+        });
+
+        // --- G1 Client Listener & Dispatcher Tests (Huy + Văn Khoa / Host integration) ---
+        RunTest("G1: ClientSessionManager authenticates provisioned accounts and rejects invalid passwords", () =>
+        {
+            var mgr = new ClientSessionManager(new[] { ClientSessionManager.HashAccount("A", "A", "passA"), ClientSessionManager.HashAccount("B", "B", "passB"), ClientSessionManager.HashAccount("C", "C", "passC"), ClientSessionManager.HashAccount("quayA", "A", "passA") });
+            var dataset = Guid.NewGuid();
+
+            var sessionA = mgr.Authenticate("A", "passA", dataset);
+            AssertNotNull(sessionA);
+            AssertEqual("A", sessionA!.OwnerId);
+            AssertEqual(dataset, sessionA.DatasetId);
+
+            var sessionWrongPass = mgr.Authenticate("A", "wrongPass", dataset);
+            AssertNull(sessionWrongPass);
+
+            var sessionWrongUser = mgr.Authenticate("unknown", "pass", dataset);
+            AssertNull(sessionWrongUser);
+
+            var validated = mgr.ValidateSession(sessionA.Token);
+            AssertNotNull(validated);
+            AssertEqual("A", validated!.OwnerId);
+        });
+
+        await RunTestAsync("G1: ClientRequestDispatcher handles LOGIN and issues session", async () =>
+        {
+            var dataset = Guid.NewGuid();
+            var control = new ClusterControl(1, dataset);
+            var store = new FakeBookingStore();
+            var gate = new FakeAuthorityGate();
+            await using var coordinator = new CommandCoordinator(dataset, gate, store, new FakeReplicationPipeline());
+            var mgr = new ClientSessionManager(new[] { ClientSessionManager.HashAccount("A", "A", "passA"), ClientSessionManager.HashAccount("B", "B", "passB"), ClientSessionManager.HashAccount("C", "C", "passC"), ClientSessionManager.HashAccount("quayA", "A", "passA") });
+            var dispatcher = new ClientRequestDispatcher(dataset, 1, control, coordinator, mgr);
+
+            var loginPayload = JsonDocument.Parse("{\"type\":\"LOGIN\",\"username\":\"A\",\"password\":\"passA\"}").RootElement.Clone();
+            var reqEnv = new ClientEnvelope(1, dataset, Guid.NewGuid(), Guid.NewGuid(), 0, loginPayload);
+
+            ClientSessionRecord? session = null;
+            var replyJson = await dispatcher.DispatchAsync(reqEnv, null, s => session = s, CancellationToken.None);
+            AssertNotNull(session);
+            AssertEqual("A", session!.OwnerId);
+
+            using var replyDoc = JsonDocument.Parse(replyJson);
+            AssertEqual("OK", replyDoc.RootElement.GetProperty("status").GetString());
+            AssertEqual("A", replyDoc.RootElement.GetProperty("ownerId").GetString());
+        });
+
+        await RunTestAsync("G1: ClientRequestDispatcher rejects unauthenticated calls and peer RPCs on client port", async () =>
+        {
+            var dataset = Guid.NewGuid();
+            var control = new ClusterControl(1, dataset);
+            var store = new FakeBookingStore();
+            var gate = new FakeAuthorityGate();
+            await using var coordinator = new CommandCoordinator(dataset, gate, store, new FakeReplicationPipeline());
+            var mgr = new ClientSessionManager(new[] { ClientSessionManager.HashAccount("A", "A", "passA"), ClientSessionManager.HashAccount("B", "B", "passB"), ClientSessionManager.HashAccount("C", "C", "passC"), ClientSessionManager.HashAccount("quayA", "A", "passA") });
+            var dispatcher = new ClientRequestDispatcher(dataset, 1, control, coordinator, mgr);
+
+            // 1. Unauthenticated GET_SEATS
+            var getSeatsPayload = JsonDocument.Parse("{\"type\":\"GET_SEATS\"}").RootElement.Clone();
+            var unauthEnv = new ClientEnvelope(1, dataset, Guid.NewGuid(), Guid.NewGuid(), 0, getSeatsPayload);
+            var reply1 = await dispatcher.DispatchAsync(unauthEnv, null, _ => { }, CancellationToken.None);
+            using var doc1 = JsonDocument.Parse(reply1);
+            AssertEqual("REJECTED", doc1.RootElement.GetProperty("status").GetString());
+            AssertEqual("UNAUTHORIZED", doc1.RootElement.GetProperty("error").GetString());
+
+            // 2. Peer RPC (APPEND_APPLY) rejected on client port
+            var appendPayload = JsonDocument.Parse("{\"type\":\"APPEND_APPLY\"}").RootElement.Clone();
+            var peerEnv = new ClientEnvelope(1, dataset, Guid.NewGuid(), Guid.NewGuid(), 0, appendPayload);
+            var reply2 = await dispatcher.DispatchAsync(peerEnv, null, _ => { }, CancellationToken.None);
+            using var doc2 = JsonDocument.Parse(reply2);
+            AssertEqual("REJECTED", doc2.RootElement.GetProperty("status").GetString());
+            AssertEqual("PEER_RPC_NOT_ALLOWED_ON_CLIENT_PORT", doc2.RootElement.GetProperty("error").GetString());
+        });
+
+        await RunTestAsync("G1: ClientRequestDispatcher executes HOLD command through coordinator and returns FINAL", async () =>
+        {
+            var dataset = Guid.NewGuid();
+            var control = new ClusterControl(1, dataset);
+            var store = new FakeBookingStore { DatasetId = dataset };
+            var gate = new FakeAuthorityGate { CanServe = true };
+            await using var coordinator = new CommandCoordinator(dataset, gate, store, new FakeReplicationPipeline());
+            var mgr = new ClientSessionManager(new[] { ClientSessionManager.HashAccount("A", "A", "passA"), ClientSessionManager.HashAccount("B", "B", "passB"), ClientSessionManager.HashAccount("C", "C", "passC"), ClientSessionManager.HashAccount("quayA", "A", "passA") });
+            var dispatcher = new ClientRequestDispatcher(dataset, 1, control, coordinator, mgr);
+            var sessionA = mgr.Authenticate("A", "passA", dataset)!;
+
+            var holdPayload = JsonDocument.Parse("{\"type\":\"HOLD\",\"tripId\":1,\"seatNo\":7}").RootElement.Clone();
+            var reqId = Guid.NewGuid();
+            var holdEnv = new ClientEnvelope(1, dataset, Guid.NewGuid(), Guid.NewGuid(), 0, holdPayload, reqId);
+
+            using var rejected = JsonDocument.Parse(await dispatcher.DispatchAsync(
+                holdEnv with { RequestId = null }, sessionA, _ => { }, CancellationToken.None));
+            AssertEqual("MISSING_REQUEST_ID", rejected.RootElement.GetProperty("error").GetString());
+            AssertEqual(0, store.AppliedEvents.Count);
+
+            var replyJson = await dispatcher.DispatchAsync(holdEnv, sessionA, _ => { }, CancellationToken.None);
+            using var replyDoc = JsonDocument.Parse(replyJson);
+            AssertEqual("FINAL", replyDoc.RootElement.GetProperty("status").GetString());
+            var result = replyDoc.RootElement.GetProperty("result");
+            AssertEqual(ResultCodes.OkHeld, result.GetProperty("code").GetString());
+            AssertEqual(7, result.GetProperty("seatNo").GetInt32());
+
+            using var lookupPayload = JsonDocument.Parse("{\"type\":\"GET_RESULT\"}");
+            using var lookupReply = JsonDocument.Parse(await dispatcher.DispatchAsync(
+                holdEnv with { Payload = lookupPayload.RootElement }, sessionA, _ => { }, CancellationToken.None));
+            AssertEqual(1L, lookupReply.RootElement.GetProperty("appliedIndex").GetInt64());
+
+            // GET_MY_RESERVATIONS under same session A returns seat 7
+            var getMyResPayload = JsonDocument.Parse("{\"type\":\"GET_MY_RESERVATIONS\"}").RootElement.Clone();
+            var getMyResEnv = new ClientEnvelope(1, dataset, Guid.NewGuid(), Guid.NewGuid(), 0, getMyResPayload);
+            var myResJson = await dispatcher.DispatchAsync(getMyResEnv, sessionA, _ => { }, CancellationToken.None);
+            using var myResDoc = JsonDocument.Parse(myResJson);
+            AssertEqual("FINAL", myResDoc.RootElement.GetProperty("status").GetString());
+            var reservations = myResDoc.RootElement.GetProperty("reservations");
+            AssertEqual(1, reservations.GetArrayLength());
+            AssertEqual(7, reservations[0].GetProperty("seatNo").GetInt32());
+            AssertEqual("A", reservations[0].GetProperty("ownerId").GetString());
+
+            // Different counter session (B) cannot see A's reservation
+            var sessionB = mgr.Authenticate("B", "passB", dataset)!;
+            var bResJson = await dispatcher.DispatchAsync(getMyResEnv, sessionB, _ => { }, CancellationToken.None);
+            using var bResDoc = JsonDocument.Parse(bResJson);
+            AssertEqual(0, bResDoc.RootElement.GetProperty("reservations").GetArrayLength());
+        });
+
+        await RunTestAsync("G1: SDK login and HOLD use the same connection and return the server NodeId", async () =>
+        {
+            var dataset = Fixtures.SampleDatasetId;
+            var store = new FakeBookingStore();
+            var gate = new FakeAuthorityGate();
+            await using var coordinator = new CommandCoordinator(dataset, gate, store, new FakeReplicationPipeline());
+            var accounts = new[] { ClientSessionManager.HashAccount("A", "A", "test-password") };
+            var dispatcher = new ClientRequestDispatcher(dataset, 1, new ClusterControl(1, dataset), coordinator,
+                new ClientSessionManager(accounts));
+            var (client, server) = await CreateLoopbackChannelPairAsync();
+            await using var clientChannel = client;
+            await using var serverChannel = server;
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            var handling = dispatcher.HandleConnectionAsync(serverChannel, timeout.Token);
+            try
+            {
+                var session = await new De6.Client.Sdk.ClientLoginService(new De6.Client.Sdk.ClientLoginProtocol()).LoginAsync(
+                    clientChannel, "A", "test-password", dataset, timeout.Token);
+                AssertEqual("A", session.OwnerId);
+                using var payload = JsonDocument.Parse("{\"type\":\"HOLD\",\"tripId\":1,\"seatNo\":7}");
+                var request = new ClientEnvelope(1, dataset, Guid.NewGuid(), Guid.NewGuid(), 1,
+                    payload.RootElement, Guid.NewGuid());
+                var protocol = new De6.Client.Sdk.ClientNodeWireProtocol();
+                await clientChannel.WriteFrameAsync(protocol.SerializeEnvelope(request), timeout.Token);
+                var response = protocol.DeserializeEnvelope(await clientChannel.ReadFrameAsync(timeout.Token));
+                AssertEqual(1, response.SenderId);
+                AssertEqual(request.CorrelationId, response.CorrelationId);
+                AssertEqual(request.RequestId, response.RequestId);
+                AssertEqual("FINAL", response.Payload.GetProperty("status").GetString());
+            }
+            finally
+            {
+                timeout.Cancel();
+                await handling;
+            }
+        });
+
+        await RunTestAsync("G2: NetworkPeerChannel sends APPEND_APPLY across real TCP socket to PeerRequestDispatcher and receives durable ACK", async () =>
+        {
+            var dataset = Fixtures.SampleDatasetId;
+            var store = new FakeBookingStore { DatasetId = dataset };
+            var receiver = new ReplicaReceiver(dataset, 2, store);
+            var dispatcher = new PeerRequestDispatcher(2, dataset, receiver);
+
+            var (clientChannel, serverChannel) = await CreateLoopbackChannelPairAsync();
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+
+            var peerIdentity = new AuthenticatedPeerIdentity(1, new string('0', 64));
+            _ = Task.Run(() => dispatcher.HandleConnectionAsync(serverChannel, peerIdentity, cts.Token));
+
+            await using var peerChannel = new NetworkPeerChannel(2, 1, dataset, clientChannel);
+
+            // Create a persisted event
+            var eventId = Guid.NewGuid();
+            var payloadBytes = System.Text.Encoding.UTF8.GetBytes("{\"test\":\"data\"}");
+            var eventHash = CanonicalProtocol.ComputeEventHashBytes(new byte[32], payloadBytes);
+            var resultPayload = CanonicalProtocol.SerializeBusinessResult(new BusinessResult(ResultCodes.OkHeld, 1, 1, Guid.NewGuid(), null));
+            var persistedEvent = new PersistedEvent(dataset, 1, 1, 1, eventId, payloadBytes, eventHash, resultPayload);
+
+            var receipt = await peerChannel.SendAppendApplyAsync(persistedEvent, TimeSpan.FromSeconds(3), cts.Token);
+            AssertNotNull(receipt);
+            AssertEqual(2, receipt!.NodeId);
+            AssertEqual(1L, receipt.AuthorityEpoch);
+            AssertEqual(1L, receipt.EventEpoch);
+            AssertEqual(1L, receipt.LogIndex);
+            AssertEqual(eventId, receipt.EventId);
+            AssertTrue(receipt.EventHash.Span.SequenceEqual(eventHash));
+        });
+
+        await RunTestAsync("G2: PeerRequestDispatcher rejects client RPCs on peer port", async () =>
+        {
+            var dataset = Fixtures.SampleDatasetId;
+            var store = new FakeBookingStore { DatasetId = dataset };
+            var receiver = new ReplicaReceiver(dataset, 2, store);
+            var dispatcher = new PeerRequestDispatcher(2, dataset, receiver);
+
+            var (clientChannel, serverChannel) = await CreateLoopbackChannelPairAsync();
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+
+            var peerIdentity = new AuthenticatedPeerIdentity(1, new string('0', 64));
+            _ = Task.Run(() => dispatcher.HandleConnectionAsync(serverChannel, peerIdentity, cts.Token));
+
+            // Send a CLIENT RPC (HOLD) to peer port
+            var holdPayload = JsonDocument.Parse("{\"type\":\"HOLD\",\"tripId\":1,\"seatNo\":1}").RootElement.Clone();
+            var clientEnv = new ClientEnvelope(1, dataset, Guid.NewGuid(), Guid.NewGuid(), 1, holdPayload);
+            await clientChannel.WriteFrameAsync(WireCodec.SerializeEnvelope(clientEnv), cts.Token);
+
+            var replyBytes = await clientChannel.ReadFrameAsync(cts.Token);
+            var replyEnv = WireCodec.DeserializeEnvelope(replyBytes);
+            using var replyDoc = JsonDocument.Parse(replyEnv.Payload.GetRawText());
+            AssertEqual("REJECTED", replyDoc.RootElement.GetProperty("status").GetString());
+            AssertEqual("CLIENT_RPC_NOT_ALLOWED_ON_PEER_PORT", replyDoc.RootElement.GetProperty("error").GetString());
+        });
+
+        await RunTestAsync("G2: Full Stack - Primary Coordinator replicates over TCP via NetworkPeerChannel to Backup Node achieving FINAL", async () =>
+        {
+            var dataset = Fixtures.SampleDatasetId;
+            var primaryStore = new FakeBookingStore { DatasetId = dataset };
+            var backupStore = new FakeBookingStore { DatasetId = dataset };
+
+            var backupReceiver = new ReplicaReceiver(dataset, 2, backupStore);
+            var backupDispatcher = new PeerRequestDispatcher(2, dataset, backupReceiver);
+
+            var (clientChannel, serverChannel) = await CreateLoopbackChannelPairAsync();
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+
+            var peerIdentity = new AuthenticatedPeerIdentity(1, new string('0', 64));
+            _ = Task.Run(() => backupDispatcher.HandleConnectionAsync(serverChannel, peerIdentity, cts.Token));
+
+            await using var networkPeerChannel = new NetworkPeerChannel(2, 1, dataset, clientChannel);
+            var sender = new SynchronousReplicaSender(new[] { networkPeerChannel }, localNodeId: 1);
+
+            var primaryGate = new FakeAuthorityGate { CanServe = true, CurrentEpoch = 1, LeaderId = 1 };
+            await using var coordinator = new CommandCoordinator(dataset, primaryGate, primaryStore, sender);
+
+            var holdCmd = Fixtures.CreateHoldCommand(dataset, Guid.NewGuid(), "A", 3);
+            var reply = await coordinator.SubmitAsync(holdCmd, cts.Token);
+
+            AssertEqual(TransportStatus.Final, reply.Status);
+            AssertNotNull(reply.Result);
+            AssertEqual(ResultCodes.OkHeld, reply.Result!.Code);
+            AssertEqual(3, reply.Result.SeatNo);
+
+            // Verify both primary and backup stores have persisted and advanced logIndex 1
+            AssertEqual(1L, primaryStore.GetStableIndex());
+            AssertEqual(1, primaryStore.AppliedEvents.Count);
+            AssertEqual(1, backupStore.AppliedEvents.Count);
+            AssertTrue(primaryStore.AppliedEvents[0].EventHash.Span.SequenceEqual(backupStore.AppliedEvents[0].EventHash.Span));
+        });
+
+        await RunTestAsync("G2: Full Stack - Network drop prevents Stable advance and returns UNKNOWN with gate blocked", async () =>
+        {
+            var dataset = Fixtures.SampleDatasetId;
+            var primaryStore = new FakeBookingStore { DatasetId = dataset };
+
+            var (clientChannel, serverChannel) = await CreateLoopbackChannelPairAsync();
+            // Server channel closed immediately to simulate connection reset / drop
+            await serverChannel.DisposeAsync();
+
+            await using var networkPeerChannel = new NetworkPeerChannel(2, 1, dataset, clientChannel);
+            var sender = new SynchronousReplicaSender(new[] { networkPeerChannel }, localNodeId: 1);
+
+            var primaryGate = new FakeAuthorityGate { CanServe = true, CurrentEpoch = 1, LeaderId = 1 };
+            await using var coordinator = new CommandCoordinator(dataset, primaryGate, primaryStore, sender);
+
+            var holdCmd = Fixtures.CreateHoldCommand(dataset, Guid.NewGuid(), "A", 4);
+            var reply = await coordinator.SubmitAsync(holdCmd, CancellationToken.None);
+
+            AssertEqual(TransportStatus.Unknown, reply.Status);
+            AssertEqual(0L, primaryStore.GetStableIndex()); // StableIndex must NOT advance
+            AssertEqual(false, primaryGate.CanServe); // Gate blocked on uncertain outcome
+        });
+
         Console.WriteLine($"\n========================================");
         Console.WriteLine($"Summary: {_count - _failures}/{_count} tests PASSED.");
         Console.WriteLine($"========================================");
@@ -945,5 +1377,22 @@ internal static partial class Program
     {
         if (value is not null)
             throw new InvalidOperationException($"Value was not null: {value}");
+    }
+
+    private static async Task<(IFrameChannel ClientChannel, IFrameChannel ServerChannel)> CreateLoopbackChannelPairAsync()
+    {
+        var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((System.Net.IPEndPoint)listener.LocalEndpoint).Port;
+
+        var clientTcp = new System.Net.Sockets.TcpClient();
+        var connectTask = clientTcp.ConnectAsync(System.Net.IPAddress.Loopback, port);
+        var serverTcp = await listener.AcceptTcpClientAsync();
+        await connectTask;
+        listener.Stop();
+
+        var clientChannel = new StreamFrameChannel(clientTcp.GetStream());
+        var serverChannel = new StreamFrameChannel(serverTcp.GetStream());
+        return (clientChannel, serverChannel);
     }
 }

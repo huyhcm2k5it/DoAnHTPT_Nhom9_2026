@@ -59,8 +59,22 @@ public sealed partial class SqlBookingStore
             await using var reader=await command.ExecuteReaderAsync();
             var rows=new List<ReservationData>();
             while(await reader.ReadAsync()) rows.Add(ReservationFrom(reader,reader.GetGuid(6)));
-            return (new ReservationsSnapshot(node.Index,rows),(PersistedEvent?)null);
+            return (new ReservationsSnapshot(options.DatasetId,node.Epoch,node.Index,rows),(PersistedEvent?)null);
         },null,cancellation);
+    }
+
+    /// <summary>Server-side lookup at the authoritative prefix for request identity and deduplication.</summary>
+    public async Task<PersistedEvent?> FindStableRequestAsync(Guid requestId, long expectedIndex, CancellationToken cancellation=default)
+    {
+        cancellation.ThrowIfCancellationRequested();
+        using var lease=gate.EnterSnapshot(expectedIndex);
+        return await Transaction(async(connection,transaction,node)=>
+        {
+            RequireSnapshot(node,expectedIndex);
+            var entry=await FindEvent(connection,transaction,"l.RequestId=@id",requestId);
+            Require(entry is null || entry.LogIndex<=node.Index,StoreRejection.InvariantViolation);
+            return (entry,(PersistedEvent?)null);
+        },requestId,cancellation);
     }
 
     /// <summary>Administrative LOCAL evidence only: existence does not imply Stable or FINAL.</summary>

@@ -19,7 +19,6 @@ catch (Exception exception) when (exception is InvalidDataException or IOExcepti
 var control = new ClusterControl(options.NodeId, options.DatasetId);
 var state = control.Snapshot;
 Console.WriteLine($"S{options.NodeId} DatasetId={options.DatasetId:D} Role={state.Role.ToString().ToUpperInvariant()} ServingEnabled={state.ServingEnabled.ToString().ToLowerInvariant()} StableIndex={state.StableIndex}");
-Console.WriteLine("No booking service is listening. No FINAL responses can be produced. Activation, network listeners, peer TLS and host election wiring are still pending.");
 if (args.Contains("--check"))
 {
     Console.WriteLine("Configuration validated only; no SQL access was attempted.");
@@ -36,11 +35,18 @@ if(options.Sql is not null)
         var persistence=HostPersistence.Compose(storeOptions, health);
         var local=persistence.Control.Snapshot;
         Console.WriteLine($"SQL local probe passed: SchemaVersion={health.SchemaVersion} LastAppliedIndex={local.LastAppliedIndex} DelayedDurability={health.DelayedDurability}. No StableIndex or authority was granted.");
+        if (!args.Contains("--check-sql") && Environment.GetEnvironmentVariable("DE6_HOST_TLS_CONFIG") is { Length: > 0 } tlsPath)
+        {
+            await HostTlsRuntime.RunAsync(options, persistence, HostTlsOptions.Load(tlsPath), storeOptions, stop.Token);
+            return 0;
+        }
     }
     catch(OperationCanceledException) when(stop.IsCancellationRequested) { return 130; }
-    catch(Exception exception) when(exception is SqlException or InvalidDataException or InvalidOperationException or ArgumentException or IOException)
+    catch(Exception exception) when(exception is SqlException or InvalidDataException or InvalidOperationException or
+        ArgumentException or IOException or System.Text.Json.JsonException or FormatException or
+        System.Security.Cryptography.CryptographicException or System.Net.Sockets.SocketException)
     {
-        Console.Error.WriteLine($"SQL probe failed; node remains RECOVERING/ServingEnabled=false: {exception.Message}");
+        Console.Error.WriteLine($"Host startup failed: {exception.Message}");
         return 1;
     }
 }
@@ -51,7 +57,7 @@ else if(args.Contains("--check-sql"))
 }
 else Console.WriteLine("No SQL configured; no SQL health was checked.");
 if(args.Contains("--check-sql")) return 0;
-Console.WriteLine("Bootstrap waiting. Press Ctrl+C to stop.");
+Console.WriteLine("Bootstrap waiting without listeners. Set DE6_HOST_TLS_CONFIG to enable TLS listeners. Press Ctrl+C to stop.");
 try { await Task.Delay(Timeout.Infinite, stop.Token); }
 catch (OperationCanceledException) when (stop.IsCancellationRequested) { }
 return 0;

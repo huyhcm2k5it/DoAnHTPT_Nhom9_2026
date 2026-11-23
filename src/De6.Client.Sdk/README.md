@@ -2,7 +2,7 @@
 
 Owner: Văn Khoa.
 
-Implement authenticated reconnect to three endpoints, durable exclusive per-client pending store, same RequestId on retries, and owner isolation. IClientPendingStore is a boundary only; network, authentication, retry and disk locking are NOT IMPLEMENTED. V12 sections 15-17; T17, T31-T34.
+K3–K5 provide a file-backed pending store with exclusive locking, routing/reconnect, and result resolution with the original RequestId. The TLS connection factory depends on an implementation of `IClientNodeWireProtocol`, and login depends on `IClientLoginProtocol`. Host dispatch and WinForms integration are pending. V12 sections 15-17; T17, T31-T34.
 
 Specification: [V12](../../docs/De6_Thiet_Ke_Trien_Khai_V12.md). Team handoff and commands: [repository README](../../README.md).
 

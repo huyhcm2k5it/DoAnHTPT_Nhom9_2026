@@ -8,6 +8,13 @@ namespace De6.Server.Host;
 
 public sealed record HostPersistence(ClusterControl Control, SqlBookingStore Store, ReplicaReceiver Receiver)
 {
+    public ICommandCoordinator CreateCoordinator(IReadOnlyList<IPeerChannel> peerChannels)
+    {
+        var local = Control.Snapshot;
+        return new CommandCoordinator(local.DatasetId, Control, new SqlCoordinatorStore(Store, Control),
+            new SynchronousReplicaSender(peerChannels, local.NodeId));
+    }
+
     public static HostPersistence Compose(SqlStoreOptions options, SqlStorageHealthReport health)
     {
         if (health.NodeId != options.NodeId || health.DatasetId != options.DatasetId)

@@ -57,7 +57,7 @@ public sealed class FakeAuthorityGate : IAuthorityGate
     public void BlockUncertain() => CanServe = false;
 }
 
-public sealed class FakeBookingStore : De6.Booking.Domain.IBookingStore
+public sealed class FakeBookingStore : De6.Booking.Domain.IBookingStore, De6.Contracts.IBookingStore
 {
     public readonly ConcurrentDictionary<int, SeatView> Seats = new();
     public readonly ConcurrentDictionary<Guid, ReservationRecord> Reservations = new();
@@ -65,6 +65,8 @@ public sealed class FakeBookingStore : De6.Booking.Domain.IBookingStore
     public readonly ConcurrentDictionary<Guid, ExistingRequestRecord> Requests = new();
     public readonly List<PersistedEvent> AppliedEvents = new();
     public long StableIndex;
+    public int NodeId { get; set; } = 2;
+    public Guid DatasetId { get; set; } = Fixtures.SampleDatasetId;
     public bool FailMarkStable { get; set; }
     public bool SkipMarkStable { get; set; }
     public Func<Task>? BeforeFindAsync { get; set; }
@@ -106,7 +108,7 @@ public sealed class FakeBookingStore : De6.Booking.Domain.IBookingStore
         var rows = await GetReservationsByOwnerAsync(ownerId, cancellationToken);
         if (AppliedEvents.Count != expectedIndex)
             throw new InvalidOperationException("Snapshot index mismatch.");
-        var snapshot = new StableReservationsSnapshot(Fixtures.SampleDatasetId, AppliedEvents.LastOrDefault()?.Epoch ?? 1, AppliedEvents.Count, rows);
+        var snapshot = new StableReservationsSnapshot(DatasetId, AppliedEvents.LastOrDefault()?.Epoch ?? 1, AppliedEvents.Count, rows);
         return TransformReservationsSnapshot?.Invoke(snapshot) ?? snapshot;
     }
 
@@ -126,15 +128,40 @@ public sealed class FakeBookingStore : De6.Booking.Domain.IBookingStore
         return req;
     }
 
-    public Task<PersistedEvent> ApplyLocalAsync(
+    public async ValueTask<StableSnapshot> ReadSeatsSnapshotAsync(long expectedIndex, CancellationToken cancellationToken = default)
+    {
+        if (AppliedEvents.Count != expectedIndex)
+            throw new InvalidOperationException("Snapshot index mismatch.");
+        return new(DatasetId, AppliedEvents.LastOrDefault()?.Epoch ?? 1,
+            expectedIndex, await GetAllSeatsAsync(cancellationToken));
+    }
+
+    public Task<StoreApplyResult> DecideAndApplyAsync(
+        CommandIdentity command,
+        AcceptedAuthority authority,
+        long expectedNextIndex,
+        CancellationToken cancellation = default)
+    {
+        return DecideAndApplyAsync(new AuthenticatedCommand(command), authority, expectedNextIndex, cancellation);
+    }
+
+    public Task<StoreApplyResult> DecideAndApplyAsync(
         AuthenticatedCommand command,
-        BookingDecision decision,
-        long epoch,
-        int writerId,
-        DateTime utcNow,
+        AcceptedAuthority authority,
+        long expectedNextIndex,
         CancellationToken cancellationToken = default)
     {
         var logIndex = AppliedEvents.Count + 1;
+        if (logIndex != expectedNextIndex)
+            throw new InvalidOperationException("Apply index mismatch.");
+        var (epoch, writerId) = authority;
+        var utcNow = DateTime.UtcNow;
+        var identity = command.Identity;
+        var seat = Seats[identity.Command.SeatNo];
+        var reservation = identity.Command.ReservationId is { } id ? Reservations.GetValueOrDefault(id) : null;
+        var ticket = reservation is null ? null : Tickets.Values.FirstOrDefault(t => t.ReservationId == reservation.ReservationId);
+        var decision = BookingDecisionEngine.Decide(identity.Command, identity.OwnerId, seat,
+            reservation, ticket, logIndex, epoch, writerId, utcNow);
         var eventId = Guid.NewGuid();
         var beforeSeatVersion = Seats[command.Identity.Command.SeatNo].VersionIndex;
 
@@ -194,7 +221,7 @@ public sealed class FakeBookingStore : De6.Booking.Domain.IBookingStore
             resultPayload);
 
         AppliedEvents.Add(persisted);
-        return Task.FromResult(persisted);
+        return Task.FromResult(new StoreApplyResult(persisted, false));
     }
 
     public Task MarkStableAsync(long logIndex, CancellationToken cancellationToken = default)
@@ -213,6 +240,45 @@ public sealed class FakeBookingStore : De6.Booking.Domain.IBookingStore
     }
 
     public long GetStableIndex() => StableIndex;
+
+    public Task<AppliedReceipt> AppendAndApplyAsync(PersistedEvent entry, AuthenticatedPeerAuthority peer, CancellationToken cancellation = default)
+    {
+        AppliedEvents.Add(entry);
+        StableIndex = entry.LogIndex;
+        var receipt = new AppliedReceipt(NodeId, peer.Authority.Epoch, entry.Epoch, entry.LogIndex, entry.EventId, entry.EventHash, null);
+        return Task.FromResult(receipt);
+    }
+
+    public Task<AppliedReceipt> ApplyReplayEntryAsync(PersistedEvent entry, AuthenticatedPeerIdentity authenticatedSource, RecoveryContext context, CancellationToken cancellation = default)
+    {
+        AppliedEvents.Add(entry);
+        StableIndex = entry.LogIndex;
+        var receipt = new AppliedReceipt(NodeId, context.TargetEpoch, entry.Epoch, entry.LogIndex, entry.EventId, entry.EventHash, context.RunId);
+        return Task.FromResult(receipt);
+    }
+
+    public Task<StableSnapshot> ReadStableSnapshotAsync(long expectedIndex, CancellationToken cancellation = default)
+    {
+        return ReadSeatsSnapshotAsync(expectedIndex, cancellation).AsTask();
+    }
+
+    public Task<StoredResultSnapshot?> ReadStableResultAsync(Guid requestId, string owner, long expectedIndex, CancellationToken cancellation = default)
+    {
+        if (Requests.TryGetValue(requestId, out var req) && req.OwnerId == owner && req.IsStable && req.LogIndex <= expectedIndex)
+        {
+            var bytes = CanonicalProtocol.SerializeBusinessResult(req.Result);
+            return Task.FromResult<StoredResultSnapshot?>(new StoredResultSnapshot(expectedIndex, requestId, owner, req.LogIndex, bytes));
+        }
+        return Task.FromResult<StoredResultSnapshot?>(null);
+    }
+
+    public Task<ReservationsSnapshot> ReadMyReservationsAsync(string owner, long expectedIndex, CancellationToken cancellation = default)
+    {
+        var list = Reservations.Values.Where(r => r.OwnerId == owner)
+            .Select(r => new ReservationData(r.ReservationId, r.TripId, r.SeatNo, r.OwnerId, r.Status, r.CreatedUtc, r.UpdatedIndex))
+            .ToList();
+        return Task.FromResult(new ReservationsSnapshot(DatasetId, 1, expectedIndex, list));
+    }
 }
 
 public sealed class FakeReplicationPipeline : IReplicaSender
