@@ -13,4 +13,9 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 $transportHarness = Join-Path $RepoRoot "tests/unit/De6.Transport.Tcp.Tests/bin/$Configuration/net10.0/De6.Transport.Tcp.Tests.dll"
 & $DotnetPath $transportHarness
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+# K6 controller tests: real client SDK against the FAKE simulated cluster (not T-matrix evidence).
+$k6Harness = Join-Path $RepoRoot "tests/unit/De6.Client.K6.Tests/bin/$Configuration/net10.0/De6.Client.K6.Tests.dll"
+& $DotnetPath $k6Harness
 exit $LASTEXITCODE

@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<title>K6 – Giao diện quầy C1 (bản mô phỏng để import Figma)</title>
+<style>
+  :root {
+    --sky: #3AA8F0; --sky-deep: #1B7FD1; --navy: #1F4E79; --sky-pale: #EAF5FD;
+    --sky-border: #BFE0F7; --ink: #17324D; --muted: #5B7A94; --warn: #D98200; --white: #FFFFFF;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body { background: #E9EEF3; font-family: "Segoe UI", Arial, sans-serif; font-size: 14px; color: var(--ink); padding: 24px; }
+  .window { width: 1120px; height: 740px; margin: 0 auto; background: var(--sky-pale); display: flex; flex-direction: column; border: 1px solid #9FB6C8; }
+
+  .header { height: 72px; background: var(--sky); color: var(--white); padding: 8px 20px; display: flex; justify-content: space-between; }
+  .header h1 { font-size: 22px; font-weight: 600; margin-top: 2px; }
+  .header .sub { margin-top: 4px; }
+  .header .right { text-align: right; display: flex; flex-direction: column; gap: 10px; align-items: flex-end; }
+  .badge { background: var(--white); color: var(--sky-deep); font-weight: 700; padding: 1px 6px; }
+
+  .demo { height: 46px; background: var(--white); padding: 8px 16px; display: flex; align-items: center; gap: 12px; }
+  .demo .label { color: var(--muted); }
+  .btn { height: 36px; padding: 0 18px; border: 1px solid var(--sky); background: var(--white); color: var(--sky-deep); font-weight: 700; font-family: inherit; font-size: 14px; display: inline-flex; align-items: center; justify-content: center; }
+  .btn.primary { background: var(--sky); color: var(--white); }
+  .btn.disabled { background: var(--sky-pale); color: #9FB6C8; border-color: var(--sky-border); }
+  .btn.small { height: 30px; }
+
+  .body { flex: 1; display: grid; grid-template-columns: 60% 40%; grid-template-rows: 70% 30%; gap: 10px; padding: 12px 16px 8px; min-height: 0; }
+  .card { background: var(--white); border: 1px solid var(--sky-border); padding: 10px 14px 12px; display: flex; flex-direction: column; min-height: 0; }
+  .card-head { height: 32px; display: flex; justify-content: space-between; align-items: center; }
+  .card-title { font-size: 15px; font-weight: 600; color: var(--sky-deep); }
+  .muted { color: var(--muted); font-size: 13px; }
+  .span2 { grid-column: 1 / span 2; }
+  .right-col { display: grid; grid-template-rows: 45% 55%; gap: 10px; min-height: 0; }
+
+  .seats { flex: 1; display: grid; grid-template-columns: repeat(5, 1fr); grid-template-rows: repeat(2, 1fr); gap: 12px; padding: 6px 0; }
+  .seat { position: relative; border: 2px solid var(--sky); border-radius: 12px; background: var(--white); color: var(--sky-deep); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; }
+  .seat .no { font-size: 30px; font-weight: 600; line-height: 1; }
+  .seat .st { font-size: 13px; font-weight: 700; }
+  .seat.selected { border: 3px solid var(--ink); }
+  .seat.mine { background: var(--sky); border-color: var(--sky-deep); color: var(--white); }
+  .seat.other { background: repeating-linear-gradient(135deg, var(--sky-pale) 0 5px, #D4EAF9 5px 7px); border-color: var(--sky-border); color: var(--navy); }
+  .seat.sold { background: var(--navy); border-color: var(--navy); color: var(--white); }
+  .chip { position: absolute; top: 6px; right: 8px; background: var(--warn); color: var(--white); font-family: Consolas, monospace; font-size: 12px; padding: 1px 5px; border-radius: 5px; }
+
+  .actions { height: 44px; display: flex; align-items: center; gap: 6px; }
+  .actions .sel { font-weight: 700; margin-right: 10px; }
+  .legend { height: 38px; color: var(--muted); font-size: 13px; }
+
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; font-weight: 400; padding: 6px 6px; border-bottom: 1px solid var(--sky-border); }
+  td { padding: 6px 6px; }
+  tr.warn td { color: var(--warn); }
+  .trace { flex: 1; background: var(--sky-pale); padding: 6px 8px; font-family: Consolas, monospace; font-size: 12px; line-height: 1.5; overflow: hidden; }
+
+  .status { height: 34px; background: var(--white); padding: 0 16px; display: flex; justify-content: space-between; align-items: center; }
+  .status .metrics { color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="window">
+
+  <div class="header">
+    <div>
+      <h1>Quầy C1 · Owner A</h1>
+      <div class="sub">Bán vé tàu cao tốc · Chuyến 1 · 10 ghế</div>
+    </div>
+    <div class="right">
+      <div>Primary S3 · epoch 1 · stable 9</div>
+      <div class="badge">DEMO · CỤM GIẢ LẬP</div>
+    </div>
+  </div>
+
+  <div class="demo">
+    <span class="label">Tiêm lỗi (FAKE):</span>
+    <span>☐ Mất mạng</span>
+    <span class="btn small">Rớt response lần sau</span>
+    <span class="btn small">Rớt response + cắt mạng</span>
+  </div>
+
+  <div class="body">
+    <div class="card">
+      <div class="card-head"><span class="card-title">Sơ đồ 10 ghế</span><span class="muted">Snapshot Stable · applied 9 · 05:44:18</span></div>
+      <div class="seats">
+        <div class="seat selected"><span class="no">1</span><span class="st">AVAILABLE</span></div>
+        <div class="seat sold"><span class="no">2</span><span class="st">SOLD</span></div>
+        <div class="seat other"><span class="no">3</span><span class="st">HELD</span></div>
+        <div class="seat other"><span class="no">4</span><span class="st">HELD</span></div>
+        <div class="seat mine"><span class="no">5</span><span class="st">HELD · của tôi</span></div>
+        <div class="seat"><span class="no">6</span><span class="st">AVAILABLE</span></div>
+        <div class="seat"><span class="chip">UNKNOWN</span><span class="no">7</span><span class="st">AVAILABLE</span></div>
+        <div class="seat"><span class="no">8</span><span class="st">AVAILABLE</span></div>
+        <div class="seat"><span class="no">9</span><span class="st">AVAILABLE</span></div>
+        <div class="seat"><span class="no">10</span><span class="st">AVAILABLE</span></div>
+      </div>
+      <div class="actions">
+        <span class="sel">Ghế 1</span>
+        <span class="btn primary">Giữ ghế</span>
+        <span class="btn disabled">Xác nhận mua</span>
+        <span class="btn disabled">Hủy giữ</span>
+        <span class="btn">Làm mới</span>
+      </div>
+      <div class="legend">AVAILABLE: viền xanh · HELD của tôi: nền xanh · HELD khác: nền sọc · SOLD: xanh đậm · Nhãn cam: lệnh đang gửi/UNKNOWN (chưa xác nhận)</div>
+    </div>
+
+    <div class="right-col">
+      <div class="card">
+        <div class="card-head"><span class="card-title">Giữ ghế của quầy</span></div>
+        <table>
+          <tr><th>Ghế</th><th>Reservation</th><th>Trạng thái</th></tr>
+          <tr><td>5</td><td>3f9a1c07</td><td>HELD</td></tr>
+        </table>
+      </div>
+      <div class="card">
+        <div class="card-head"><span class="card-title">Lệnh chờ kết quả (pending / UNKNOWN)</span><span class="btn small">Tra kết quả (GET_RESULT)</span></div>
+        <table>
+          <tr><th>Lệnh</th><th>Ghế</th><th>RequestId</th><th>Trạng thái</th><th>Chi tiết</th></tr>
+          <tr class="warn"><td>HOLD</td><td>7</td><td>b81e42d0</td><td>UNKNOWN</td><td>Mất kết nối khi chờ phản hồi</td></tr>
+        </table>
+      </div>
+    </div>
+
+    <div class="card span2">
+      <div class="card-head"><span class="card-title">Trace (gửi · FINAL · UNKNOWN)</span><span class="btn small">Xuất số liệu</span></div>
+      <div class="trace">
+        05:44:17.684 [INFO] Quầy C1 owner=A dataset=124a4f064ac14c128b27202600000009<br>
+        05:44:17.735 [INFO] Khôi phục 0 lệnh pending chưa có kết quả.<br>
+        05:46:02.110 [SEND] HOLD ghế 5 req=9d27c4e1 hash=7ab31f0c<br>
+        05:46:02.231 [FINAL] req=9d27c4e1 HOLD ghế 5 -&gt; OK_HELD<br>
+        05:47:10.402 [SEND] HOLD ghế 7 req=b81e42d0 hash=51c0aa9e<br>
+        05:47:10.518 [WARN] req=b81e42d0 UNKNOWN: Mất kết nối khi chờ phản hồi (giữ pending, không tạo RequestId mới)
+      </div>
+    </div>
+  </div>
+
+  <div class="status">
+    <span>FINAL · ghế 5: Đã giữ ghế (OK_HELD)</span>
+    <span class="metrics">Gửi 2 · FINAL 1 · UNKNOWN 1 · xác định sau 0 · TB 121 ms · p95 121 ms</span>
+  </div>
+</div>
+</body>
+</html>

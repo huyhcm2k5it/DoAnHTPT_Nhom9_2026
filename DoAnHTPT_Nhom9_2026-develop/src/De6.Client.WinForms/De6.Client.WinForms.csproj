@@ -1,4 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup><OutputType>WinExe</OutputType><TargetFramework>net10.0-windows</TargetFramework><UseWindowsForms>true</UseWindowsForms></PropertyGroup>
-  <ItemGroup><ProjectReference Include="../De6.Client.Sdk/De6.Client.Sdk.csproj" /></ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../De6.Client.Sdk/De6.Client.Sdk.csproj" />
+    <ProjectReference Include="../De6.Client.Simulation/De6.Client.Simulation.csproj" />
+  </ItemGroup>
 </Project>
